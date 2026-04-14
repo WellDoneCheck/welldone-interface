@@ -14,7 +14,7 @@ pnpm dev
 bun dev
 ```
 
-## 安裝 Icon 圖示庫
+### 安裝 Icon 圖示庫
 
 ```bash
 npm install lucide-react
