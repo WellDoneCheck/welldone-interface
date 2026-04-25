@@ -2,6 +2,7 @@
 
 import { usePathname } from 'next/navigation';
 import Siderbar from '@/app/sidebar/page';
+import ThemeToggle from './ThemeToggle';
 
 const noSidebarPages = ['/', '/login'];
 
@@ -13,7 +14,8 @@ export default function LayoutBody({ children }: { children: React.ReactNode }) 
 
   return (
     <body>
-      {!login_state ? (
+      <ThemeToggle />
+      {hideSidebar ? (
         <>{children}</>
       ) : (
         <>

@@ -1,5 +1,5 @@
 'use client';
-import "../css/light.css";
+import "../globals.css";
 import Link from 'next/link';
 import ImportModal from '@/components/ImportModal';
 import { useState } from 'react';
@@ -123,10 +123,10 @@ export default function Dashboard() {
                   </div>  
                   <div className="cell-action">
                     {item.status === 'success' ? (
-                      <Link className="view-btn" href="/recognition" style={{textDecoration: 'none'}}>
+                      <button className="view-btn">
                         <Eye className="view-icon" />
-                          查看
-                      </Link>
+                        <span>查看</span>
+                      </button>
                     ) : (
                       <span className="dash">—</span>
                     )}
@@ -142,18 +142,18 @@ export default function Dashboard() {
               <Upload className="qa-icon" />
               <span>上傳圖片辨識</span>
             </a>
-            <a className="qa-item secondary" href="/history">
+            <Link className="qa-item secondary" href="/history">
               <History className="qa-icon" />
               <span>查看辨識紀錄</span>
-            </a>
-            <a className="qa-item secondary" href="/map">
+            </Link  >
+            <Link className="qa-item secondary" href="/map">
               <Map className="qa-icon" />
               <span>開啟地圖檢視</span>
-            </a>
-            <a className="qa-item secondary" href="/settings">
+            </Link  >
+            <Link className="qa-item secondary" href="/settings">
               <Settings className="qa-icon" />
               <span>帳號設定</span>
-            </a>
+            </Link>
           </div>
         </div>
         {showImport && <ImportModal onClose={() => setShowImport(false)} />}
