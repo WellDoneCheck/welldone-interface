@@ -13,7 +13,7 @@ import {
 
 const navItems = [
   { icon: LayoutDashboard, label: '首頁',href: '/dashboard'},
-  { icon: Scan, label: '水井辨識',href: '/scan'},
+  { icon: Scan, label: '水井辨識',href: '/well'},
   { icon: History, label: '辨識紀錄',href: '/history' },
   { icon: Map, label: '地圖檢視',href: '/map'},
 ];
@@ -29,7 +29,7 @@ export default function Sidebar() {
 
       <div className="nav-group">
         {navItems.map((item) => {
-          const isActive = pathname === item.href; // 自動比對
+          const isActive = pathname === item.href || pathname.startsWith(item.href + '/'); // 自動比對
           const Icon = item.icon;
           return (
             <Link

@@ -123,10 +123,10 @@ export default function Dashboard() {
                   </div>  
                   <div className="cell-action">
                     {item.status === 'success' ? (
-                      <button className="view-btn">
+                      <Link href="/review" className="view-btn">
                         <Eye className="view-icon" />
                         <span>查看</span>
-                      </button>
+                      </Link>
                     ) : (
                       <span className="dash">—</span>
                     )}

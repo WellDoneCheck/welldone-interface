@@ -800,6 +800,7 @@ hr.title-divider,
   background: #f8fafc;
   border-radius: 8px;
   gap: 30px;
+  width: 100%;
 }
 
 .col-header span {
@@ -941,6 +942,7 @@ hr.title-divider,
   font-weight: 600;
   color: #3b82f6;
   transition: background 0.2s;
+  text-decoration:none;
 }
 
 .view-btn:hover {
@@ -1061,7 +1063,23 @@ hr.title-divider,
  *  RECOGNITION 頁面 (recognition.html)
  *  比對辨識結果 - 統計卡片 (水平)、圖片對比、操作按鈕
  * ============================================================ */
-.stat-icon-wrap {
+  .rs .stats-row {
+    display: flex;
+    gap: 20px;
+    width: 100%;
+  }
+  .stat-card-rs {
+    width: 20%;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px;
+    background: #ffffff;
+    border-radius: 14px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.04);
+  }
+ .stat-icon-wrap {
   width: 40px;
   height: 40px;
   border-radius: 10px;
@@ -1071,7 +1089,7 @@ hr.title-divider,
   flex-shrink: 0;
 }
 
-.stat-icon-wrap svg {
+.stat-icon-wrap .stat-icon {
   width: 20px;
   height: 20px;
   stroke-width: 2;
@@ -1084,7 +1102,7 @@ hr.title-divider,
   background: #eef3ff;
 }
 
-.stat-icon-wrap.blue svg {
+.stat-icon-wrap.blue .stat-icon {
   stroke: #3b82f6;
 }
 
@@ -1092,7 +1110,7 @@ hr.title-divider,
   background: #ecfdf5;
 }
 
-.stat-icon-wrap.green svg {
+.stat-icon-wrap.green .stat-icon {
   stroke: #22c55e;
 }
 
@@ -1100,7 +1118,7 @@ hr.title-divider,
   background: #fef3c7;
 }
 
-.stat-icon-wrap.amber svg {
+.stat-icon-wrap.amber .stat-icon {
   stroke: #f59e0b;
 }
 
@@ -1108,7 +1126,7 @@ hr.title-divider,
   background: #fef2f2;
 }
 
-.stat-icon-wrap.red svg {
+.stat-icon-wrap.red .stat-icon {
   stroke: #ef4444;
 }
 
@@ -1116,7 +1134,7 @@ hr.title-divider,
   background: #f0f2ff;
 }
 
-.stat-icon-wrap.purple svg {
+.stat-icon-wrap.purple .stat-icon {
   stroke: #4643f0;
 }
 
@@ -1127,17 +1145,27 @@ hr.title-divider,
   min-width: 0;
 }
 
+.rs .stat-value{
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
 /* Image Cards */
-.images-row {
+.images{
   height: 100%;
   display: flex;
+  justify-content: center;
+}
+.images-row {
+  display: flex;
   gap: 20px;
-  width: 100%;
+  width: auto;
   align-items: center;
 }
 
 .image-card {
-  width: 45%;
+  width: auto;
   height: 100%;
   flex: 1;
   background: #ffffff;
@@ -1151,10 +1179,10 @@ hr.title-divider,
 }
 
 .image-card-title {
-  font-size: 18px;
+  font-size: 16px;
   font-weight: 600;
   color: #334155;
-  align-self: flex-start;
+  align-self: center;
 }
 
 .image-placeholder {
@@ -1631,6 +1659,17 @@ hr.title-divider,
   justify-content: flex-end;
   gap: 30px;
   width: 100%;
+}
+.stat-items {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat-items span {
+    font-size: 13px;
+    font-weight: 400;
+    color: #64748b;
 }
 
 /* Export page btn-export variant (amber gradient) */
@@ -2358,7 +2397,7 @@ hr.title-divider,
 
 /* Well Column Header */
 .col-name {
-  width: 40%;
+  width: 30%;
 }
 
 .col-status {
@@ -2486,6 +2525,7 @@ hr.title-divider,
   border: none;
   cursor: pointer;
   transition: filter 0.2s;
+  text-decoration:none;
 }
 
 .btn-confirm-task:hover {
@@ -2519,9 +2559,8 @@ hr.title-divider,
   width: 42%;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 15px 10px;
   height: auto;
-  overflow-y: auto;
 }
 
 /* Steps Card */
@@ -2530,6 +2569,7 @@ hr.title-divider,
   border-radius: 14px;
   height: auto;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  padding: 10px;
 }
 
 .step {
@@ -2698,7 +2738,7 @@ hr.title-divider,
 }
 
 .btn-area {
-  padding: 0px 20px 15px 20px;
+  padding: 5px 20px 0px 20px;
 }
 
 .btn-start {
@@ -2744,32 +2784,32 @@ hr.title-divider,
   gap: 10px;
 }
 
-.guide-card {
+.guide-card-guide {
   display: flex;
+  flex: 1;
   align-items: center;
   gap: 12px;
-  height: 60px;
-  padding: 14px 16px;
+  padding: 10px 15px;
   border-radius: 12px;
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.04);
 }
 
-.guide-card.blue {
+.guide-card-guide.blue {
   background: #f8faff;
   border-left: 3px solid #3b82f6;
 }
 
-.guide-card.green {
+.guide-card-guide.green {
   background: #f0fdf4;
   border-left: 3px solid #22c55e;
 }
 
-.guide-card.amber {
+.guide-card-guide.amber {
   background: #fffbeb;
   border-left: 3px solid #f59e0b;
 }
 
-.guide-icon {
+.guide-icon-bg {
   width: 32px;
   height: 32px;
   border-radius: 8px;
@@ -2779,7 +2819,7 @@ hr.title-divider,
   flex-shrink: 0;
 }
 
-.guide-icon svg {
+.guide-icon-img {
   width: 18px;
   height: 18px;
   stroke-width: 2;
@@ -2788,27 +2828,27 @@ hr.title-divider,
   stroke-linejoin: round;
 }
 
-.guide-icon.blue {
+.guide-icon-bg.blue {
   background: #eef3ff;
 }
 
-.guide-icon.blue svg {
+.guide-icon-bg.blue .guide-icon-img {
   stroke: #3b82f6;
 }
 
-.guide-icon.green {
+.guide-icon-bg.green {
   background: #ecfdf5;
 }
 
-.guide-icon.green svg {
+.guide-icon-bg.green .guide-icon-img {
   stroke: #22c55e;
 }
 
-.guide-icon.amber {
+.guide-icon-bg.amber {
   background: #fef3c7;
 }
 
-.guide-icon.amber svg {
+.guide-icon-bg.amber .guide-icon-img {
   stroke: #f59e0b;
 }
 
@@ -3590,6 +3630,19 @@ html.dark .stat-value { color: #e2e8f0; }
 html.dark .stat-change span.green { color: #10b981; }
 html.dark .stat-change span.blue { color: #10b981; }
 html.dark .stat-change span.amber { color: #fbbf24; }
+/* Guide Cards */
+html.dark .guide-card.blue { background: #0c1117; border-left-color: #10b981; }
+html.dark .guide-card.green { background: #0b2318; border-left-color: #10b981; }
+html.dark .guide-card.amber { background: #1a1e0a; border-left-color: #fbbf24; }
+html.dark .guide-card.card-blue { background: #0c1117; border-left-color: #10b981; }
+html.dark .guide-card.card-green { background: #0b2318; border-left-color: #10b981; }
+html.dark .guide-card.card-amber { background: #1a1e0a; border-left-color: #fbbf24; }
+html.dark .guide-icon-bg.blue { background: #0d2926; }
+html.dark .guide-icon-bg.blue .guide-icon { color: #10b981; }
+html.dark .guide-icon-bg.green { background: #0a2520; }
+html.dark .guide-icon-bg.green .guide-icon { color: #10b981; }
+html.dark .guide-icon-bg.amber { background: #221c0a; }
+html.dark .guide-icon-bg.amber .guide-icon { color: #f59e0b; }
 
 /* Records */
 html.dark .recent-records { background: #151e2b; border: 1px solid #1e3248; box-shadow: 0 8px 24px rgba(0,0,0,0.145); }
@@ -3631,6 +3684,19 @@ html.dark .qa-link .link-icon { color: #10b981; }
 html.dark .image-card { background: #151e2b; border: 1px solid #293d55; box-shadow: 0 4px 20px rgba(0,0,0,0.145); }
 html.dark .image-card-title { color: #cbd5e1; }
 html.dark .image-placeholder { background: #131c2b; border: 1px solid rgba(41,61,85,0.25); }
+html.dark .stat-card-rs { background: #151e2b; border: 1px solid #1e3248; box-shadow: 0 8px 24px rgba(0,0,0,0.145); }
+html.dark .stat-icon-wrap.blue { background: #0c1a3d; }
+html.dark .stat-icon-wrap.blue .stat-icon { stroke: #60a5fa; }
+html.dark .stat-icon-wrap.green { background: #0a2520; }
+html.dark .stat-icon-wrap.green .stat-icon { stroke: #10b981; }
+html.dark .stat-icon-wrap.amber { background: #221c0a; }
+html.dark .stat-icon-wrap.amber .stat-icon { stroke: #f59e0b; }
+html.dark .stat-icon-wrap.red { background: #221414; }
+html.dark .stat-icon-wrap.red .stat-icon { stroke: #ef4444; }
+html.dark .stat-icon-wrap.purple { background: #1c1535; }
+html.dark .stat-icon-wrap.purple .stat-icon { stroke: #8b5cf6; }
+html.dark .rs .stat-value {  color: #e2e8f0;}
+html.dark .btn-reject {  background: linear-gradient(180deg, #ef4444, #b91c1c);  box-shadow: 0 3px 10px rgba(239, 68, 68, 0.19);}
 html.dark .btn-confirm { background: linear-gradient(180deg, #10b981, #059669); box-shadow: 0 3px 10px rgba(16,185,129,0.25); }
 
 /* ===== RECORDS PAGE ===== */
@@ -3780,18 +3846,18 @@ html.dark .step-hint { color: #b0bfd0; }
 html.dark .btn-start { background: linear-gradient(180deg, #3b82f6, #2563eb); }
 
 /* Guide Cards */
-html.dark .guide-card.blue { background: #0c1117; border-left-color: #10b981; }
-html.dark .guide-card.green { background: #0b2318; border-left-color: #10b981; }
-html.dark .guide-card.amber { background: #1a1e0a; border-left-color: #fbbf24; }
-html.dark .guide-card.card-blue { background: #0c1117; border-left-color: #10b981; }
-html.dark .guide-card.card-green { background: #0b2318; border-left-color: #10b981; }
-html.dark .guide-card.card-amber { background: #1a1e0a; border-left-color: #fbbf24; }
-html.dark .guide-icon-bg.blue { background: #0d2926; }
-html.dark .guide-icon-bg.blue .guide-icon { color: #10b981; }
+html.dark .guide-card-guide.blue { background: #0c1117; border-left-color: #10b981; }
+html.dark .guide-card-guide.green { background: #0b2318; border-left-color: #10b981; }
+html.dark .guide-card-guide.amber { background: #1a1e0a; border-left-color: #fbbf24; }
+html.dark .guide-card-guide.card-blue { background: #0c1117; border-left-color: #10b981; }
+html.dark .guide-card-guide.card-green { background: #0b2318; border-left-color: #10b981; }
+html.dark .guide-card-guide.card-amber { background: #1a1e0a; border-left-color: #fbbf24; }
+html.dark .guide-icon-bg.blue { background: #0c1a3d; }
+html.dark .guide-icon-bg.blue .guide-icon-img { color: #60a5fa; }
 html.dark .guide-icon-bg.green { background: #0a2520; }
-html.dark .guide-icon-bg.green .guide-icon { color: #10b981; }
+html.dark .guide-icon-bg.green .guide-icon-img { color: #10b981; }
 html.dark .guide-icon-bg.amber { background: #221c0a; }
-html.dark .guide-icon-bg.amber .guide-icon { color: #f59e0b; }
+html.dark .guide-icon-bg.amber .guide-icon-img { color: #f59e0b; }
 html.dark .guide-title { color: #e2e8f0; }
 html.dark .guide-card-title { color: #e2e8f0; }
 html.dark .guide-desc { color: #b0bfd0; }
