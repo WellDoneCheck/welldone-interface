@@ -130,7 +130,7 @@ export default function Well() {
                 </div>
                 <div className="guides">
                     <div className="guide-card-guide blue">
-                        <div className="guide-icon-bg blue">
+                        <div className="guide-icon-bg-w blue">
                             <ImageIcon className='guide-icon-img' />
                         </div>
                         <div>
@@ -139,7 +139,7 @@ export default function Well() {
                         </div>
                     </div>
                     <div className="guide-card-guide green">
-                        <div className="guide-icon-bg green">
+                        <div className="guide-icon-bg-w green">
                             <FileText className='guide-icon-img'/>
                         </div>
                         <div>
@@ -148,7 +148,7 @@ export default function Well() {
                         </div>
                     </div>
                     <div className="guide-card-guide amber">
-                        <div className="guide-icon-bg amber">
+                        <div className="guide-icon-bg-w amber">
                             <TriangleAlert className='guide-icon-img' />
                         </div>
                         <div>

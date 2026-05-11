@@ -1,5 +1,4 @@
 'use client';
-import '../globals.css';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
@@ -9,14 +8,17 @@ import {
   History,
   Map,
   User,
+  UserRoundPen,
 } from 'lucide-react';
 
 const navItems = [
   { icon: LayoutDashboard, label: '首頁',href: '/dashboard'},
   { icon: Scan, label: '水井辨識',href: '/well'},
-  { icon: History, label: '辨識紀錄',href: '/history' },
+  { icon: History, label: '辨識紀錄',href: '/records' },
   { icon: Map, label: '地圖檢視',href: '/map'},
+  { icon: UserRoundPen, label: '用戶管理',href: '/users', adminOnly: true },
 ];
+const account = true;
 
 export default function Sidebar() {
   const pathname = usePathname();
@@ -28,7 +30,9 @@ export default function Sidebar() {
       <hr className="sidebar-divider" />
 
       <div className="nav-group">
-        {navItems.map((item) => {
+        {navItems
+        .filter((item) => !item.adminOnly || account)
+        .map((item) => {
           const isActive = pathname === item.href || pathname.startsWith(item.href + '/'); // 自動比對
           const Icon = item.icon;
           return (
@@ -50,6 +54,7 @@ export default function Sidebar() {
         <User className="w-5 h-5 text-slate-600" />
         <span className="text-sm text-slate-600">王小明</span>
       </Link>
+      
     </nav>
   );
 }

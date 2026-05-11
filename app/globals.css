@@ -1822,6 +1822,12 @@ hr.title-divider,
   justify-content: flex-end;
 }
 
+.add{
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
 .btn-csv-import {
   display: flex;
   align-items: center;
@@ -1995,7 +2001,7 @@ hr.title-divider,
   display: flex;
   flex-direction: column;
   gap: 10px;
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .csv-title-row {
@@ -2246,6 +2252,11 @@ hr.title-divider,
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+}
+.info {
+  display: flex; 
+  align-items: center; 
+  justify-content: space-between;
 }
 
 .info-title {
@@ -2569,7 +2580,7 @@ hr.title-divider,
   border-radius: 14px;
   height: auto;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  padding: 10px;
+  padding: 15px;
 }
 
 .step {
@@ -2809,9 +2820,9 @@ hr.title-divider,
   border-left: 3px solid #f59e0b;
 }
 
-.guide-icon-bg {
-  width: 32px;
-  height: 32px;
+.guide-icon-bg-w {
+  width: 40px;
+  height: 40px;
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -2820,46 +2831,46 @@ hr.title-divider,
 }
 
 .guide-icon-img {
-  width: 18px;
-  height: 18px;
+  width: 25px;
+  height: 25px;
   stroke-width: 2;
   fill: none;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
 
-.guide-icon-bg.blue {
+.guide-icon-bg-w.blue {
   background: #eef3ff;
 }
 
-.guide-icon-bg.blue .guide-icon-img {
+.guide-icon-bg-w.blue .guide-icon-img {
   stroke: #3b82f6;
 }
 
-.guide-icon-bg.green {
+.guide-icon-bg-w.green {
   background: #ecfdf5;
 }
 
-.guide-icon-bg.green .guide-icon-img {
+.guide-icon-bg-w.green .guide-icon-img {
   stroke: #22c55e;
 }
 
-.guide-icon-bg.amber {
+.guide-icon-bg-w.amber {
   background: #fef3c7;
 }
 
-.guide-icon-bg.amber .guide-icon-img {
+.guide-icon-bg-w.amber .guide-icon-img {
   stroke: #f59e0b;
 }
 
 .guide-title {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
   color: #1e293b;
 }
 
 .guide-desc {
-  font-size: 11px;
+  font-size: 13px;
   color: #64748b;
   line-height: 1.5;
 }
@@ -2869,6 +2880,8 @@ hr.title-divider,
  *  地圖檢視 - 地圖區域 + 資訊面板
  * ============================================================ */
 .map-area {
+  width: 100%;
+  height: auto;
   flex: 1;
   border-radius: 14px;
   border: 1px solid #e2e8f0;
@@ -2931,7 +2944,7 @@ hr.title-divider,
   left: 44%;
 }
 
-.map-pin svg {
+.map-pin-icon {
   width: 32px;
   height: 32px;
   fill: #ef4444;
@@ -3127,6 +3140,16 @@ hr.title-divider,
   background: #ecfdf5;
   border-radius: 20px;
   padding: 6px 12px;
+}
+
+.status-badge .status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.status-badge .status-text {
+  font-size: 12px; font-weight: 600; color: #16a34a;
 }
 
 .panel-spacer {
@@ -3405,13 +3428,13 @@ hr.title-divider,
 }
 
 .guide-icon { 
-  width: 14px; 
-  height: 14px; 
+  width: 20px; 
+  height: 20px; 
 }
 
 .guide-icon-bg {
-  width: 28px;
-  height: 28px;
+  width: 40px;
+  height: 40px;
   border-radius: 8px;
   display: flex;
   align-items: center;
@@ -3443,7 +3466,7 @@ hr.title-divider,
 }
 
 .guide-card-title {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
   color: #1e293b;
 }
@@ -3631,18 +3654,19 @@ html.dark .stat-change span.green { color: #10b981; }
 html.dark .stat-change span.blue { color: #10b981; }
 html.dark .stat-change span.amber { color: #fbbf24; }
 /* Guide Cards */
-html.dark .guide-card.blue { background: #0c1117; border-left-color: #10b981; }
+html.dark .guide-card.blue { background: #0c1117; border-left-color: #60a5fa; }
 html.dark .guide-card.green { background: #0b2318; border-left-color: #10b981; }
 html.dark .guide-card.amber { background: #1a1e0a; border-left-color: #fbbf24; }
-html.dark .guide-card.card-blue { background: #0c1117; border-left-color: #10b981; }
+html.dark .guide-card.card-blue { background: #0c1117; border-left-color: #60a5fa; }
 html.dark .guide-card.card-green { background: #0b2318; border-left-color: #10b981; }
 html.dark .guide-card.card-amber { background: #1a1e0a; border-left-color: #fbbf24; }
-html.dark .guide-icon-bg.blue { background: #0d2926; }
-html.dark .guide-icon-bg.blue .guide-icon { color: #10b981; }
+html.dark .guide-icon-bg.blue { background: #0c1a3d; }
+html.dark .guide-icon-bg.blue .guide-icon { color: #60a5fa; }
 html.dark .guide-icon-bg.green { background: #0a2520; }
 html.dark .guide-icon-bg.green .guide-icon { color: #10b981; }
 html.dark .guide-icon-bg.amber { background: #221c0a; }
 html.dark .guide-icon-bg.amber .guide-icon { color: #f59e0b; }
+
 
 /* Records */
 html.dark .recent-records { background: #151e2b; border: 1px solid #1e3248; box-shadow: 0 8px 24px rgba(0,0,0,0.145); }
@@ -3846,18 +3870,18 @@ html.dark .step-hint { color: #b0bfd0; }
 html.dark .btn-start { background: linear-gradient(180deg, #3b82f6, #2563eb); }
 
 /* Guide Cards */
-html.dark .guide-card-guide.blue { background: #0c1117; border-left-color: #10b981; }
+html.dark .guide-card-guide.blue { background: #0c1117; border-left-color: #60a5fa; }
 html.dark .guide-card-guide.green { background: #0b2318; border-left-color: #10b981; }
 html.dark .guide-card-guide.amber { background: #1a1e0a; border-left-color: #fbbf24; }
-html.dark .guide-card-guide.card-blue { background: #0c1117; border-left-color: #10b981; }
+html.dark .guide-card-guide.card-blue { background: #0c1117; border-left-color: #60a5fa; }
 html.dark .guide-card-guide.card-green { background: #0b2318; border-left-color: #10b981; }
 html.dark .guide-card-guide.card-amber { background: #1a1e0a; border-left-color: #fbbf24; }
-html.dark .guide-icon-bg.blue { background: #0c1a3d; }
-html.dark .guide-icon-bg.blue .guide-icon-img { color: #60a5fa; }
-html.dark .guide-icon-bg.green { background: #0a2520; }
-html.dark .guide-icon-bg.green .guide-icon-img { color: #10b981; }
-html.dark .guide-icon-bg.amber { background: #221c0a; }
-html.dark .guide-icon-bg.amber .guide-icon-img { color: #f59e0b; }
+html.dark .guide-icon-bg-w.blue { background: #0c1a3d; }
+html.dark .guide-icon-bg-w.blue .guide-icon-img { color: #60a5fa; }
+html.dark .guide-icon-bg-w.green { background: #0a2520; }
+html.dark .guide-icon-bg-w.green .guide-icon-img { color: #10b981; }
+html.dark .guide-icon-bg-w.amber { background: #221c0a; }
+html.dark .guide-icon-bg-w.amber .guide-icon-img { color: #f59e0b; }
 html.dark .guide-title { color: #e2e8f0; }
 html.dark .guide-card-title { color: #e2e8f0; }
 html.dark .guide-desc { color: #b0bfd0; }
@@ -3886,6 +3910,8 @@ html.dark .info-icon-bg.green { background: #0a2520; }
 html.dark .info-icon-bg.green svg { stroke: #10b981; }
 html.dark .info-value { color: #e2e8f0; }
 html.dark .status-badge { background: #0a2520; }
+html.dark .status-badge .status-dot{ background: #10b981; }
+html.dark .status-badge .status-text{ color: #34d399; }
 html.dark .locate-btn { background: linear-gradient(to bottom, #10b981, #059669); box-shadow: 0 4px 12px rgba(16,185,129,0.19); }
 
 /* ===== MODAL ===== */
