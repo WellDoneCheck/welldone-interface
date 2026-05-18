@@ -73,6 +73,7 @@ export default function UsersPage() {
                             <div className="td-cell">{user.account}</div>
                             <div className="td-action">
                                 <button className="btn-reset">重設密碼</button>
+                                <button className="btn-delete">刪除用戶</button>
                             </div>
                         </div>
                     ))}

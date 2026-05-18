@@ -43,7 +43,7 @@ export default function Well() {
                 </div>
             </div>
 
-            <div className="col-header">
+            <div className="col-header-w">
                 <span className="col-name">任務名稱</span>
                 <span className="col-status">辨識進度</span>
                 <span className="col-confirm">雙重確認</span>

@@ -2,6 +2,14 @@
 import { useRouter } from 'next/navigation';
 import { MapPin, Timer, Target, Layers, List, X, Check } from 'lucide-react';
 
+const recognitionData = {
+    coordinates: 'N 23.456782, E 120.345672',
+    time: '2024/12/15 14:32:08',
+    confidence: '92.7%',
+    image: 'DRONE_00045.jpg',
+    wellType: '圓井',
+};
+
 export default function Recognition() {
     const router = useRouter();
     return (
@@ -15,7 +23,7 @@ export default function Recognition() {
                     </div>
                     <div className="stat-text">
                         <span className="stat-label">座標位置</span>
-                        <span className="stat-value">N 23.456782<br />E 120.345672</span>
+                        <span className="stat-value">{recognitionData.coordinates}</span>
                     </div>
                 </div>
                 <div className="stat-card-rs">
@@ -24,7 +32,7 @@ export default function Recognition() {
                     </div>
                     <div className=" stat-text">
                         <span className="stat-label">辨識時間</span>
-                        <span className="stat-value">2024/12/15 14:32:08</span>
+                        <span className="stat-value">{recognitionData.time}</span>
                     </div>
                 </div>
                 <div className="stat-card-rs">
@@ -33,10 +41,9 @@ export default function Recognition() {
                     </div>
                     <div className="stat-text">
                         <span className="stat-label">辨識信心度</span>
-                        <span className="stat-value">92.7%</span>
+                        <span className="stat-value">{recognitionData.confidence}</span>
                     </div>
                 </div>
-
                     {/* 圖片資訊 */}
                 <div className="stat-card-rs">
                     <div className="stat-icon-wrap red">
@@ -44,7 +51,7 @@ export default function Recognition() {
                     </div>
                     <div className="stat-text">
                         <span className="stat-label">圖片資訊</span>
-                        <span className="stat-value">DRONE_00045.jpg</span>
+                        <span className="stat-value">{recognitionData.image}</span>
                     </div>
                 </div>
 
@@ -55,10 +62,11 @@ export default function Recognition() {
                     </div>
                     <div className="stat-text">
                         <span className="stat-label">水井類型</span>
-                        <span className="stat-value">圓井</span>
+                        <span className="stat-value">{recognitionData.wellType}</span>
                     </div>
                 </div>
             </div>
+
             <div className="images">
                 <div className="images-row">
                     <div className="image-card">

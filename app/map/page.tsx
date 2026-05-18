@@ -7,13 +7,17 @@ import { useState } from 'react';
 
 const regions = ['北', '中', '南', '東'];
 
+const recognitionData = {
+    coordinates: 'N 23.456782, E 120.345672',
+    time: '2024/12/15 14:32:08',
+    image: 'DRONE_00045.jpg',
+    wellType: '圓井',
+};
+
 export default function Map() {
         const [activeRegion, setActiveRegion] = useState('北');
     return (
         <>
-            {/* <div className="page-title">地圖檢視</div>
-            <hr className="title-divider" />
-             */}
             <div className="content-row">
                 {/* Map Area */}
                 <div className="map-area">
@@ -57,13 +61,13 @@ export default function Map() {
                     <div className="img-placeholder">
                         <ImageIcon size={36} />
                     </div>
-                    <div className="img-filename">DRONE_00045.jpg</div>
-                    <div className="checkbox-row">
+                    <div className="img-filename">{recognitionData.image}</div>
+                    {/* <div className="checkbox-row">
                         <div className="checkbox">
                         <Check size={12} />
                         </div>
                         <span className="checkbox-label">顯示原圖</span>
-                    </div>
+                    </div> */}
                     </div>
 
                     {/* Coordinates Card */}
@@ -73,13 +77,13 @@ export default function Map() {
                         <div className="info-icon-bg blue">
                         <Navigation size={14} />
                         </div>
-                        <span className="info-value">N : 23.456782</span>
+                        <span className="info-value">N : {recognitionData.coordinates.split(', ')[0].split(' ')[1]}</span>
                     </div>
                     <div className="info-row">
                         <div className="info-icon-bg blue">
                         <Navigation size={14} />
                         </div>
-                        <span className="info-value">E : 120.345672</span>
+                        <span className="info-value">E : {recognitionData.coordinates.split(', ')[1].split(' ')[1]}</span>
                     </div>
                     </div>
 
@@ -90,7 +94,7 @@ export default function Map() {
                         <div className="info-icon-bg green">
                         <Droplets size={14} />
                         </div>
-                        <span className="info-value">圓井</span>
+                        <span className="info-value">{recognitionData.wellType}</span>
                     </div>
                     <div className="info-row">
                         <div className="status-badge">

@@ -6,8 +6,7 @@ import { useState } from 'react';
 
 import {
   Plus, ClipboardList, Target, ImageIcon, ShieldCheck,
-  Folder, CircleCheck, Loader, Eye,
-  Upload, History, Map, Settings
+  Folder, CircleCheck, Loader, Upload, History, Map, Settings
 } from 'lucide-react';
 
 const leastData = [
@@ -99,7 +98,6 @@ export default function Dashboard() {
               <span className="col-time">辨識時間</span>
               <span className="col-source">圖片來源</span>
               <span className="col-result">辨識結果</span>
-              <span className="col-action">查看</span>
             </div>
 
             {leastData.map((item, index) => (
@@ -121,16 +119,6 @@ export default function Dashboard() {
                       <span>{item.result}</span>
                     </div>
                   </div>  
-                  <div className="cell-action">
-                    {item.status === 'success' ? (
-                      <Link href="/review" className="view-btn">
-                        <Eye className="view-icon" />
-                        <span>查看</span>
-                      </Link>
-                    ) : (
-                      <span className="dash">—</span>
-                    )}
-                  </div>
                 </div>
               ))}
           </div>
@@ -142,7 +130,7 @@ export default function Dashboard() {
               <Upload className="qa-icon" />
               <span>上傳圖片辨識</span>
             </a>
-            <Link className="qa-item secondary" href="/history">
+            <Link className="qa-item secondary" href="/records">
               <History className="qa-icon" />
               <span>查看辨識紀錄</span>
             </Link  >
