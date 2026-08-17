@@ -18,17 +18,21 @@ export default function Map() {
         const [activeRegion, setActiveRegion] = useState('北');
     return (
         <>
-            <div className="content-row">
+            <div className="flex gap-6 flex-1">
                 {/* Map Area */}
-                <div className="map-area">
-                    <img className="map-bg" src="https://images.unsplash.com/photo-1540632227694-bd0593e0464b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3NzMxMzI1OTV8&ixlib=rb-4.1.0&q=80&w=1080" alt="Map" />
+                <div className="w-full h-auto flex-1 rounded-[14px] border border-slate-200 dark:border-[#293d55] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-[0_6px_20px_rgba(0,0,0,0.125)] overflow-hidden relative bg-slate-200">
+                    <img className="w-full h-full object-cover block" src="https://images.unsplash.com/photo-1540632227694-bd0593e0464b?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w4NDM0ODN8MHwxfHJhbmRvbXx8fHx8fHx8fDE3NzMxMzI1OTV8&ixlib=rb-4.1.0&q=80&w=1080" alt="Map" />
 
                     {/* Region Nav */}
-                    <div className="region-nav">
+                    <div className="absolute top-4 left-4 flex flex-col bg-white dark:bg-[#151e2b] rounded-xl shadow-[0_2px_12px_rgba(0,0,0,0.125)] overflow-hidden">
                         {regions.map((region) => (
                             <button
                                 key={region}
-                                className={`region-btn ${activeRegion === region ? 'active' : ''}`}
+                                className={`w-12 h-11 flex items-center justify-center text-base cursor-pointer border-0 transition-all duration-200 ${
+                                  activeRegion === region
+                                    ? 'bg-blue-500 dark:bg-emerald-500 text-white font-bold'
+                                    : 'bg-transparent text-slate-600 dark:text-[#e2e8f0] font-semibold hover:bg-slate-100 dark:hover:bg-[#1c2d42]'
+                                }`}
                                 onClick={() => setActiveRegion(region)}
                             >
                                 {region}
@@ -37,79 +41,73 @@ export default function Map() {
                     </div>
 
                     {/* Map Pin */}
-                    <div className="map-pin">
-                        <MapPin className='map-pin-icon' fill="#ef4444" stroke="none" />
+                    <div className="absolute top-[36%] left-[44%]">
+                        <MapPin className='w-8 h-8' fill="#ef4444" stroke="none" />
                     </div>
 
                     {/* Zoom Controls */}
-                    <div className="zoom-controls">
-                    <button className="zoom-btn">
-                        <Plus size={18} />
+                    <div className="absolute top-[210px] left-4 flex flex-col bg-white dark:bg-[#151e2b] rounded-[10px] shadow-[0_2px_8px_rgba(0,0,0,0.08)] overflow-hidden">
+                    <button className="w-10 h-10 flex items-center justify-center border-0 bg-transparent cursor-pointer transition-all duration-200 hover:bg-slate-100 dark:hover:bg-[#1c2d42]">
+                        <Plus size={18} className="text-slate-600 dark:text-[#e2e8f0]" />
                     </button>
-                    <div className="zoom-divider" />
-                    <button className="zoom-btn">
-                        <Minus size={18} />
+                    <div className="h-px bg-slate-200 dark:bg-[#293d55]" />
+                    <button className="w-10 h-10 flex items-center justify-center border-0 bg-transparent cursor-pointer transition-all duration-200 hover:bg-slate-100 dark:hover:bg-[#1c2d42]">
+                        <Minus size={18} className="text-slate-600 dark:text-[#e2e8f0]" />
                     </button>
                     </div>
                 </div>
 
                 {/* Info Panel */}
-                <div className="info-panel">
+                <div className="w-[330px] flex flex-col gap-4 h-full overflow-y-auto">
                     {/* Image Preview Card */}
-                    <div className="info-card">
-                    <div className="info-card-title">選取圖片</div>
-                    <div className="img-placeholder">
-                        <ImageIcon size={36} />
+                    <div className="bg-white dark:bg-[#151e2b] dark:border dark:border-[#1e3248] rounded-[14px] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-[0_6px_20px_rgba(0,0,0,0.125)] p-[18px] flex flex-col gap-3.5">
+                    <div className="text-sm font-bold text-slate-800 dark:text-[#e2e8f0]">選取圖片</div>
+                    <div className="w-full h-[180px] bg-slate-100 dark:bg-[#1c2d42] rounded-[10px] flex items-center justify-center">
+                        <ImageIcon size={36} className="text-slate-300 dark:text-[#3d5168]" />
                     </div>
-                    <div className="img-filename">{recognitionData.image}</div>
-                    {/* <div className="checkbox-row">
-                        <div className="checkbox">
-                        <Check size={12} />
-                        </div>
-                        <span className="checkbox-label">顯示原圖</span>
-                    </div> */}
+                    <div className="text-[13px] font-normal text-slate-600 dark:text-[#e2e8f0]">{recognitionData.image}</div>
                     </div>
 
                     {/* Coordinates Card */}
-                    <div className="info-card gap-12">
-                    <div className="info-card-title">座標資訊</div>
-                    <div className="info-row">
-                        <div className="info-icon-bg blue">
-                        <Navigation size={14} />
+                    <div className="bg-white dark:bg-[#151e2b] dark:border dark:border-[#1e3248] rounded-[14px] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-[0_6px_20px_rgba(0,0,0,0.125)] p-[18px] flex flex-col gap-3">
+                    <div className="text-sm font-bold text-slate-800 dark:text-[#e2e8f0]">座標資訊</div>
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 min-w-7 rounded-md flex items-center justify-center bg-[#eef3ff] dark:bg-[#0d2926]">
+                        <Navigation size={14} className="text-blue-500 dark:text-emerald-500" />
                         </div>
-                        <span className="info-value">N : {recognitionData.coordinates.split(', ')[0].split(' ')[1]}</span>
+                        <span className="text-[13px] font-normal text-slate-600 dark:text-[#e2e8f0]">N : {recognitionData.coordinates.split(', ')[0].split(' ')[1]}</span>
                     </div>
-                    <div className="info-row">
-                        <div className="info-icon-bg blue">
-                        <Navigation size={14} />
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 min-w-7 rounded-md flex items-center justify-center bg-[#eef3ff] dark:bg-[#0d2926]">
+                        <Navigation size={14} className="text-blue-500 dark:text-emerald-500" />
                         </div>
-                        <span className="info-value">E : {recognitionData.coordinates.split(', ')[1].split(' ')[1]}</span>
+                        <span className="text-[13px] font-normal text-slate-600 dark:text-[#e2e8f0]">E : {recognitionData.coordinates.split(', ')[1].split(' ')[1]}</span>
                     </div>
                     </div>
 
                     {/* Well Type Card */}
-                    <div className="info-card gap-12">
-                    <div className="info-card-title">辨識結果</div>
-                    <div className="info-row">
-                        <div className="info-icon-bg green">
-                        <Droplets size={14} />
+                    <div className="bg-white dark:bg-[#151e2b] dark:border dark:border-[#1e3248] rounded-[14px] shadow-[0_4px_16px_rgba(0,0,0,0.04)] dark:shadow-[0_6px_20px_rgba(0,0,0,0.125)] p-[18px] flex flex-col gap-3">
+                    <div className="text-sm font-bold text-slate-800 dark:text-[#e2e8f0]">辨識結果</div>
+                    <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 min-w-7 rounded-md flex items-center justify-center bg-emerald-50 dark:bg-[#0a2520]">
+                        <Droplets size={14} className="text-green-500 dark:text-emerald-500" />
                         </div>
-                        <span className="info-value">{recognitionData.wellType}</span>
+                        <span className="text-[13px] font-normal text-slate-600 dark:text-[#e2e8f0]">{recognitionData.wellType}</span>
                     </div>
-                    <div className="info-row">
-                        <div className="status-badge">
-                        <div className="status-dot" />
-                            <span className="status-text">已辨識</span>
+                    <div className="flex items-center gap-2.5">
+                        <div className="inline-flex items-center gap-1.5 bg-emerald-50 dark:bg-[#0a2520] rounded-full py-1.5 px-3">
+                        <div className="w-2 h-2 rounded-full bg-green-500 dark:bg-emerald-500" />
+                            <span className="text-xs font-semibold text-green-600 dark:text-[#34d399]">已辨識</span>
                         </div>
                     </div>
                     </div>
 
-                    <div className="panel-spacer" />
+                    <div className="flex-1" />
 
                     {/* Locate Button */}
-                    <button className="locate-btn">
-                    <Crosshair size={18} />
-                    <span>定位至地圖</span>
+                    <button className="flex items-center justify-center gap-2 w-full h-auto bg-linear-to-b from-blue-500 dark:from-emerald-500 to-blue-600 dark:to-emerald-600 rounded-xl border-0 cursor-pointer shadow-[0_3px_10px_rgba(59,130,246,0.19)] dark:shadow-[0_4px_12px_rgba(16,185,129,0.19)] transition-opacity duration-200 py-2.5 hover:opacity-90">
+                    <Crosshair size={18} className="text-white" />
+                    <span className="text-white text-sm font-bold">定位至地圖</span>
                     </button>
                 </div>
             </div>

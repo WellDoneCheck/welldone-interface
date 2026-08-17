@@ -54,15 +54,17 @@ export default function ThemeToggle() {
 
   return (
     <button
-      className={`theme-toggle ${dragging ? 'theme-toggle-dragging' : ''}`}
+      className={`fixed z-[9999] w-12 h-12 rounded-full border-0 flex items-center justify-center touch-none select-none shadow-[0_4px_16px_rgba(0,0,0,0.2)] bg-white dark:bg-slate-800 ${
+        dragging ? 'cursor-grabbing transition-none' : 'cursor-grab transition-[background-color] duration-200'
+      }`}
       style={{ left: position.x, top: position.y }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
     >
       {dark
-        ? <Sun size={22} className="theme-icon-sun" />
-        : <Moon size={22} className="theme-icon-moon" />
+        ? <Sun size={22} className="text-amber-400" />
+        : <Moon size={22} className="text-slate-500" />
       }
     </button>
   );
