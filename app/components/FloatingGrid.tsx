@@ -61,6 +61,7 @@ export default function FloatingGrid() {
     <section 
       ref={sectionRef} 
       className="relative w-full h-[250vh] bg-white text-black"
+      data-section="kove"
       style={{ zIndex: 5 }}
     >
       <div className="sticky top-0 h-screen w-full flex overflow-hidden">

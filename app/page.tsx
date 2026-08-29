@@ -1,9 +1,28 @@
+'use client';
+
+import { useState } from 'react';
 import ScrollImageSequence from './components/ScrollImageSequence';
 import FloatingGrid from './components/FloatingGrid';
+import Navbar from './components/Navbar';
+import LoginPanel from './components/LoginPanel';
 
 export default function Home() {
+  const [loginOpen, setLoginOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-black text-white">
+      {/* Navbar */}
+      <Navbar
+        onLoginOpen={() => setLoginOpen(true)}
+        contentFaded={loginOpen}
+      />
+
+      {/* Login slide-in panel */}
+      <LoginPanel
+        isOpen={loginOpen}
+        onClose={() => setLoginOpen(false)}
+      />
+
       {/* ===== Image-sequence scroll hero ===== */}
       <ScrollImageSequence
         totalFrames={229}

@@ -238,7 +238,7 @@ export default function ScrollImageSequence({
               fontFamily: 'var(--font-noto-serif-tc), serif',
               fontSize: 'clamp(60px, 12.3vw, 330px)',
               lineHeight: '1.17',
-              color: '#68B9A5',
+              color: '#D1E6E7',
               width: '95%',
               textAlign: 'center',
               textShadow: '0 2px 40px rgba(0,0,0,0.15)',
