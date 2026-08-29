@@ -8,6 +8,7 @@ import LoginPanel from './components/LoginPanel';
 
 export default function Home() {
   const [loginOpen, setLoginOpen] = useState(false);
+  const [heroAnimating, setHeroAnimating] = useState(false);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -15,6 +16,7 @@ export default function Home() {
       <Navbar
         onLoginOpen={() => setLoginOpen(true)}
         contentFaded={loginOpen}
+        heroAnimating={heroAnimating}
       />
 
       {/* Login slide-in panel */}
@@ -29,6 +31,7 @@ export default function Home() {
         framePattern="/landing_page/map_frames/frame_{index}.jpg"
         scrollHeight={400}
         className="h-[400vh]"
+        onAnimatingChange={setHeroAnimating}
       />
 
       {/* ===== Content sections after the scroll ===== */}

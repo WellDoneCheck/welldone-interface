@@ -7,6 +7,7 @@ interface ScrollImageSequenceProps {
   framePattern: string;
   scrollHeight?: number;
   className?: string;
+  onAnimatingChange?: (animating: boolean) => void;
 }
 
 export default function ScrollImageSequence({
@@ -14,6 +15,7 @@ export default function ScrollImageSequence({
   framePattern,
   scrollHeight = 400,
   className,
+  onAnimatingChange,
 }: ScrollImageSequenceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -158,6 +160,7 @@ export default function ScrollImageSequence({
         animatingRef.current = false;
         cancelAnimationFrame(scrollAnimRef.current);
         setArrowVisible(true);
+        onAnimatingChange?.(false);
       }
     };
 
@@ -378,11 +381,13 @@ export default function ScrollImageSequence({
                 } else {
                   animatingRef.current = false;
                   setArrowVisible(true);
+                  onAnimatingChange?.(false);
                 }
               };
 
               animatingRef.current = true;
               setArrowVisible(false);
+              onAnimatingChange?.(true);
               scrollAnimRef.current = requestAnimationFrame(step);
             }}
             className="absolute bottom-10 left-1/2 z-20 -translate-x-1/2 animate-bounce cursor-pointer bg-transparent border-0 p-0"

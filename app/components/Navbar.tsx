@@ -1,19 +1,31 @@
 'use client';
 
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 
 interface NavbarProps {
   onLoginOpen: () => void;
   contentFaded: boolean;
+  heroAnimating?: boolean;
 }
 
 const NAV_ITEMS = ['水井辨識', '地圖檢視', '匯出', '歷史紀錄', '帳號管理'];
 
-export default function Navbar({ onLoginOpen, contentFaded }: NavbarProps) {
+export default function Navbar({ onLoginOpen, contentFaded, heroAnimating = false }: NavbarProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
   const [inKove, setInKove] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+
+  const handleLogoClick = useCallback(() => {
+    if (pathname === '/') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+      router.push('/');
+    }
+  }, [pathname, router]);
 
   useEffect(() => {
     const onScroll = () => {
@@ -62,11 +74,13 @@ export default function Navbar({ onLoginOpen, contentFaded }: NavbarProps) {
 
   return (
     <nav
-      className={`fixed top-0 inset-x-0 z-50 px-8 md:px-20 transition-all duration-500 ${style.navBg}`}
+      className={`fixed top-0 inset-x-0 z-50 px-8 md:px-20 transition-all duration-500 ${style.navBg} ${
+        heroAnimating ? 'opacity-0 -translate-y-full pointer-events-none' : 'opacity-100 translate-y-0'
+      }`}
     >
       <div className={`flex items-center justify-between px-6 transition-all duration-300 md:px-8 ${style.pyClass}`}>
         {/* Logo */}
-        <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity">
+        <button type="button" onClick={handleLogoClick} className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-0 p-0">
           <div className="h-8 w-8 rounded-md bg-[#68B9A5]" />
           <span
             className={`text-4xl font-bold tracking-wide transition-colors duration-500 ${style.textColor}`}
@@ -75,7 +89,7 @@ export default function Navbar({ onLoginOpen, contentFaded }: NavbarProps) {
             <span className="text-[#68B9A5]">Sky</span>
             <span className={inKove ? 'text-gray-900' : 'text-white'}>Well</span>
           </span>
-        </div>
+        </button>
 
         {/* Desktop nav links */}
         <div className="hidden md:flex items-center gap-12">
