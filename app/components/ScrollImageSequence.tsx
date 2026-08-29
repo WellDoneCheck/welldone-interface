@@ -23,8 +23,13 @@ export default function ScrollImageSequence({
   const frameCacheRef = useRef<Map<number, HTMLImageElement>>(new Map);
   const [loading, setLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
+  const gradientRef = useRef<HTMLDivElement>(null);
+  const maskGradientRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
   const [arrowVisible, setArrowVisible] = useState(true);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animatingRef = useRef(false);
+  const scrollAnimRef = useRef<number>(0);
 
   const getUrl = useCallback(
     (pattern: string, index: number) => {
@@ -99,16 +104,23 @@ export default function ScrollImageSequence({
 
           showFrame(frame);
 
-          // Hide arrow when reaching the 3rd-to-last frame
-          if (frame >= totalFrames - 3) {
+          // Fade out the first-frame gradient from frame 0 to frame 20
+          const gradientOpacity = Math.max(0, 1 - progress / (20 / totalFrames));
+          if (gradientRef.current) gradientRef.current.style.opacity = String(gradientOpacity);
+          if (maskGradientRef.current) maskGradientRef.current.style.opacity = String(gradientOpacity);
+
+          // Hide arrow during animation or when at last frame
+          if (animatingRef.current || frame >= totalFrames - 1) {
             setArrowVisible(false);
+          } else {
+            setArrowVisible(true);
           }
 
           // Handle text animation
           const textEl = textRef.current;
           if (textEl) {
-            const hideStart = 2 / totalFrames; // show text
-            const hideEnd = 10 / totalFrames; // hide text
+            const hideStart = 2 / totalFrames;
+            const hideEnd = 20 / totalFrames;
             let ty = 0;
             let opacity = 1;
             if (progress > hideStart) {
@@ -132,10 +144,31 @@ export default function ScrollImageSequence({
 
     return () => {
       cancelAnimationFrame(animRef.current);
+      if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
   }, [totalFrames, showFrame]);
+
+
+  // Cancel animation on user interaction (wheel / touch)
+  useEffect(() => {
+    const cancelAnim = () => {
+      if (animatingRef.current) {
+        animatingRef.current = false;
+        cancelAnimationFrame(scrollAnimRef.current);
+        setArrowVisible(true);
+      }
+    };
+
+    window.addEventListener('wheel', cancelAnim, { passive: true });
+    window.addEventListener('touchstart', cancelAnim, { passive: true });
+
+    return () => {
+      window.removeEventListener('wheel', cancelAnim);
+      window.removeEventListener('touchstart', cancelAnim);
+    };
+  }, []);
 
 
 
@@ -184,6 +217,15 @@ export default function ScrollImageSequence({
           style={{ objectFit: 'cover' }}
         />
 
+        {/* Layer 1.5: first-frame legibility gradient (fades out by frame 20) */}
+        {!loading && (
+          <div
+            ref={gradientRef}
+            className="absolute inset-0 z-[11] pointer-events-none"
+            style={{ background: 'linear-gradient(90deg, rgba(3, 3, 3, 0.5) 0%, rgba(35, 35, 35, 0.35) 46.63%, rgba(255, 255, 255, 0) 100%)' }}
+          />
+        )}
+
         {/* Layer 2: Text */}
         <div
           ref={textRef}
@@ -206,24 +248,45 @@ export default function ScrollImageSequence({
           </h1>
         </div>
 
-        {/* Layer 3: frame + CSS mask */}
-        <img
-          ref={maskImgRef}
-          alt=""
-          draggable={false}
-          className="absolute inset-0 z-[15] h-full w-full select-none pointer-events-none"
-          style={{
-            objectFit: 'cover',
-            maskImage: 'url(/mask.png)',
-            WebkitMaskImage: 'url(/mask.png)',
-            maskSize: '89.97%',
-            WebkitMaskSize: '89%',
-            maskPosition: 'center 38%',
-            WebkitMaskPosition: 'center 38%',
-            maskRepeat: 'no-repeat',
-            WebkitMaskRepeat: 'no-repeat',
-          }}
-        />
+        {/* Layer 3: masked video — reveals the text behind it */}
+        <div className="absolute inset-0 z-[12] overflow-hidden select-none pointer-events-none">
+          <img
+            ref={maskImgRef}
+            alt=""
+            style={{
+              position: 'absolute',
+              inset: 0,
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              maskImage: 'url(/landing_page/mask.png)',
+              WebkitMaskImage: 'url(/landing_page/mask.png)',
+              maskSize: 'cover',
+              WebkitMaskSize: 'cover',
+              maskPosition: 'center',
+              WebkitMaskPosition: 'center',
+              maskRepeat: 'no-repeat',
+              WebkitMaskRepeat: 'no-repeat',
+            }}
+          />
+          {!loading && (
+            <div
+              ref={maskGradientRef}
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                background: 'linear-gradient(90deg, rgba(3, 3, 3, 0.5) 0%, rgba(35, 35, 35, 0.35) 46.63%, rgba(255, 255, 255, 0) 100%)',
+                maskImage: 'url(/landing_page/mask.png)',
+                WebkitMaskImage: 'url(/landing_page/mask.png)',
+                maskSize: 'cover',
+                WebkitMaskSize: 'cover',
+                maskPosition: 'center',
+                WebkitMaskPosition: 'center',
+                maskRepeat: 'no-repeat',
+                WebkitMaskRepeat: 'no-repeat',
+              }}
+            />
+          )}
+        </div>
 
         {/* Loading overlay */}
         {loading && (
@@ -240,23 +303,38 @@ export default function ScrollImageSequence({
           </div>
         )}
 
-        {/* Floating scroll-down arrow */}
+        {/* Floating scroll-down arrow — hidden when at last frame */}
         {arrowVisible && !loading && (
           <button
             type="button"
             onClick={() => {
               const container = containerRef.current;
               if (!container) return;
+              const vh = window.innerHeight;
+              const containerTop = container.offsetTop;
               const rect = container.getBoundingClientRect();
-              const totalScroll = rect.height - window.innerHeight;
-              const scrollBottom = -rect.top + totalScroll;
+              const totalScroll = rect.height - vh;
+              const scrollBottom = containerTop + totalScroll;
               const startY = window.scrollY;
 
-              // Phase 1: current → frame 125/229, Phase 2: frame 125 → end
               const splitRatio = 125 / totalFrames;
-              const splitScroll = startY + (scrollBottom - startY) * splitRatio;
-              const phase1Duration = 3000; // first half
-              const phase2Duration = 3000; // second half
+              const totalDistance = scrollBottom - containerTop;
+              const currentFrame = totalDistance > 0
+                ? Math.floor(((startY - containerTop) / totalDistance) * totalFrames)
+                : 0;
+
+              // If already at/near bottom, scroll to next section
+              if (currentFrame >= totalFrames - 1 || startY >= scrollBottom - 10) {
+                const nextSection = container.nextElementSibling as HTMLElement;
+                if (nextSection) {
+                  window.scrollTo({ top: nextSection.offsetTop, behavior: 'smooth' });
+                }
+                return;
+              }
+
+              const skipPhase1 = currentFrame >= 125;
+              const splitScroll = skipPhase1 ? scrollBottom : containerTop + totalDistance * splitRatio;
+              const totalDuration = skipPhase1 ? 3000 : 5000;
 
               const easeInOutCubic = (t: number) =>
                 t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -267,25 +345,45 @@ export default function ScrollImageSequence({
               const step = (timestamp: number) => {
                 if (!startTime) startTime = timestamp;
                 const elapsed = timestamp - startTime;
-                const duration = phase === 1 ? phase1Duration : phase2Duration;
-                const from = phase === 1 ? startY : splitScroll;
-                const to = phase === 1 ? splitScroll : scrollBottom;
-                const progress = Math.min(elapsed / duration, 1);
-                const easedProgress = easeInOutCubic(progress);
 
+                let from: number;
+                let to: number;
+                let progress: number;
+
+                if (skipPhase1) {
+                  from = startY;
+                  to = scrollBottom;
+                  progress = Math.min(elapsed / totalDuration, 1);
+                } else {
+                  if (phase === 1) {
+                    from = startY;
+                    to = splitScroll;
+                    progress = Math.min(elapsed / 3000, 1);
+                  } else {
+                    from = splitScroll;
+                    to = scrollBottom;
+                    progress = Math.min(elapsed / 2000, 1);
+                  }
+                }
+
+                const easedProgress = easeInOutCubic(progress);
                 window.scrollTo(0, from + (to - from) * easedProgress);
 
                 if (progress < 1) {
-                  requestAnimationFrame(step);
-                } else if (phase === 1) {
-                  // Transition to phase 2
+                  scrollAnimRef.current = requestAnimationFrame(step);
+                } else if (!skipPhase1 && phase === 1) {
                   phase = 2;
                   startTime = timestamp;
-                  requestAnimationFrame(step);
+                  scrollAnimRef.current = requestAnimationFrame(step);
+                } else {
+                  animatingRef.current = false;
+                  setArrowVisible(true);
                 }
               };
 
-              requestAnimationFrame(step);
+              animatingRef.current = true;
+              setArrowVisible(false);
+              scrollAnimRef.current = requestAnimationFrame(step);
             }}
             className="absolute bottom-10 left-1/2 z-20 -translate-x-1/2 animate-bounce cursor-pointer bg-transparent border-0 p-0"
           >

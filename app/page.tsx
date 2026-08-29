@@ -6,7 +6,7 @@ export default function Home() {
       {/* ===== Image-sequence scroll hero ===== */}
       <ScrollImageSequence
         totalFrames={229}
-        framePattern="/frames/frame_{index}.jpg"
+        framePattern="/landing_page/frames/frame_{index}.jpg"
         scrollHeight={400}
         className="h-[400vh]"
       />
