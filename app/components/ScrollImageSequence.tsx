@@ -8,6 +8,9 @@ interface ScrollImageSequenceProps {
   scrollHeight?: number;
   className?: string;
   onAnimatingChange?: (animating: boolean) => void;
+  loop?: boolean;
+  text?: string | null;
+  mask?: boolean;
 }
 
 export default function ScrollImageSequence({
@@ -16,6 +19,9 @@ export default function ScrollImageSequence({
   scrollHeight = 400,
   className,
   onAnimatingChange,
+  loop = false,
+  text = 'AI水井辨識系統',
+  mask = true,
 }: ScrollImageSequenceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -101,7 +107,11 @@ export default function ScrollImageSequence({
           const vh = window.innerHeight;
           const totalScroll = rect.height - vh;
           const scrolled = -rect.top;
-          const progress = Math.max(0, Math.min(1, scrolled / totalScroll));
+          const rawProgress = Math.max(0, scrolled / totalScroll);
+          const loopCount = loop ? 3 : 1;
+          const progress = loop
+            ? (rawProgress * loopCount) % 1
+            : Math.min(1, rawProgress);
           const frame = Math.min(totalFrames - 1, Math.floor(progress * totalFrames));
 
           showFrame(frame);
@@ -230,28 +240,31 @@ export default function ScrollImageSequence({
         )}
 
         {/* Layer 2: Text */}
-        <div
-          ref={textRef}
-          className="absolute inset-0 z-[12] flex items-start justify-center pointer-events-none will-change-transform"
-          style={{ paddingTop: '18vh' }}
-        >
-          <h1
-            className="text-center font-black"
-            style={{
-              fontFamily: 'var(--font-noto-serif-tc), serif',
-              fontSize: 'clamp(60px, 12.3vw, 330px)',
-              lineHeight: '1.17',
-              color: '#D1E6E7',
-              width: '95%',
-              textAlign: 'center',
-              textShadow: '0 2px 40px rgba(0,0,0,0.15)',
-            }}
+        {text && (
+          <div
+            ref={textRef}
+            className="absolute inset-0 z-[12] flex items-start justify-center pointer-events-none will-change-transform"
+            style={{ paddingTop: '18vh' }}
           >
-            AI水井辨識系統
-          </h1>
-        </div>
+            <h1
+              className="text-center font-black"
+              style={{
+                fontFamily: 'var(--font-noto-serif-tc), serif',
+                fontSize: 'clamp(60px, 12.3vw, 330px)',
+                lineHeight: '1.17',
+                color: '#D1E6E7',
+                width: '95%',
+                textAlign: 'center',
+                textShadow: '0 2px 40px rgba(0,0,0,0.15)',
+              }}
+            >
+              {text}
+            </h1>
+          </div>
+        )}
 
         {/* Layer 3: masked video — reveals the text behind it */}
+        {mask && (
         <div className="absolute inset-0 z-[12] overflow-hidden select-none pointer-events-none">
           <img
             ref={maskImgRef}
@@ -290,6 +303,7 @@ export default function ScrollImageSequence({
             />
           )}
         </div>
+        )}
 
         {/* Loading overlay */}
         {loading && (
@@ -318,15 +332,10 @@ export default function ScrollImageSequence({
             const totalScroll = rect.height - vh;
             const scrollBottom = containerTop + totalScroll;
             const startY = window.scrollY;
-
-            const splitRatio = 125 / totalFrames;
             const totalDistance = scrollBottom - containerTop;
-            const currentFrame = totalDistance > 0
-              ? Math.floor(((startY - containerTop) / totalDistance) * totalFrames)
-              : 0;
 
-            // If already at/near bottom, scroll to next section
-            if (currentFrame >= totalFrames - 1 || startY >= scrollBottom - 10) {
+            // Already at bottom → scroll to next section
+            if (startY >= scrollBottom - 10) {
               const nextSection = container.nextElementSibling as HTMLElement;
               if (nextSection) {
                 window.scrollTo({ top: nextSection.offsetTop, behavior: 'smooth' });
@@ -334,9 +343,11 @@ export default function ScrollImageSequence({
               return;
             }
 
-            const skipPhase1 = currentFrame >= 125;
-            const splitScroll = skipPhase1 ? scrollBottom : containerTop + totalDistance * splitRatio;
-            const totalDuration = skipPhase1 ? 3000 : 5000;
+            // Time-based auto-scroll proportional to scroll height
+            // Speed: ~3s per 400vh of scroll distance
+            const totalDuration = Math.max(2000, (totalDistance / vh) * 3000);
+            const phase1Duration = totalDuration * 0.4;
+            const phase2Duration = totalDuration * 0.6;
 
             const easeInOutCubic = (t: number) =>
               t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -352,20 +363,14 @@ export default function ScrollImageSequence({
               let to: number;
               let progress: number;
 
-              if (skipPhase1) {
+              if (phase === 1) {
                 from = startY;
-                to = scrollBottom;
-                progress = Math.min(elapsed / totalDuration, 1);
+                to = startY + totalDistance * 0.3;
+                progress = Math.min(elapsed / phase1Duration, 1);
               } else {
-                if (phase === 1) {
-                  from = startY;
-                  to = splitScroll;
-                  progress = Math.min(elapsed / 3000, 1);
-                } else {
-                  from = splitScroll;
-                  to = scrollBottom;
-                  progress = Math.min(elapsed / 2000, 1);
-                }
+                from = startY + totalDistance * 0.3;
+                to = scrollBottom;
+                progress = Math.min(elapsed / phase2Duration, 1);
               }
 
               const easedProgress = easeInOutCubic(progress);
@@ -373,7 +378,7 @@ export default function ScrollImageSequence({
 
               if (progress < 1) {
                 scrollAnimRef.current = requestAnimationFrame(step);
-              } else if (!skipPhase1 && phase === 1) {
+              } else if (phase === 1) {
                 phase = 2;
                 startTime = timestamp;
                 scrollAnimRef.current = requestAnimationFrame(step);
