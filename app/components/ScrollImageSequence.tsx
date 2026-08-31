@@ -306,107 +306,109 @@ export default function ScrollImageSequence({
           </div>
         )}
 
-        {/* Floating scroll-down arrow — hidden when at last frame */}
-        {arrowVisible && !loading && (
-          <button
-            type="button"
-            onClick={() => {
-              const container = containerRef.current;
-              if (!container) return;
-              const vh = window.innerHeight;
-              const containerTop = container.offsetTop;
-              const rect = container.getBoundingClientRect();
-              const totalScroll = rect.height - vh;
-              const scrollBottom = containerTop + totalScroll;
-              const startY = window.scrollY;
+        {/* Floating scroll-down arrow — pop-in / pop-out animation */}
+        <button
+          type="button"
+          onClick={() => {
+            const container = containerRef.current;
+            if (!container) return;
+            const vh = window.innerHeight;
+            const containerTop = container.offsetTop;
+            const rect = container.getBoundingClientRect();
+            const totalScroll = rect.height - vh;
+            const scrollBottom = containerTop + totalScroll;
+            const startY = window.scrollY;
 
-              const splitRatio = 125 / totalFrames;
-              const totalDistance = scrollBottom - containerTop;
-              const currentFrame = totalDistance > 0
-                ? Math.floor(((startY - containerTop) / totalDistance) * totalFrames)
-                : 0;
+            const splitRatio = 125 / totalFrames;
+            const totalDistance = scrollBottom - containerTop;
+            const currentFrame = totalDistance > 0
+              ? Math.floor(((startY - containerTop) / totalDistance) * totalFrames)
+              : 0;
 
-              // If already at/near bottom, scroll to next section
-              if (currentFrame >= totalFrames - 1 || startY >= scrollBottom - 10) {
-                const nextSection = container.nextElementSibling as HTMLElement;
-                if (nextSection) {
-                  window.scrollTo({ top: nextSection.offsetTop, behavior: 'smooth' });
+            // If already at/near bottom, scroll to next section
+            if (currentFrame >= totalFrames - 1 || startY >= scrollBottom - 10) {
+              const nextSection = container.nextElementSibling as HTMLElement;
+              if (nextSection) {
+                window.scrollTo({ top: nextSection.offsetTop, behavior: 'smooth' });
+              }
+              return;
+            }
+
+            const skipPhase1 = currentFrame >= 125;
+            const splitScroll = skipPhase1 ? scrollBottom : containerTop + totalDistance * splitRatio;
+            const totalDuration = skipPhase1 ? 3000 : 5000;
+
+            const easeInOutCubic = (t: number) =>
+              t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+
+            let startTime: number | null = null;
+            let phase: 1 | 2 = 1;
+
+            const step = (timestamp: number) => {
+              if (!startTime) startTime = timestamp;
+              const elapsed = timestamp - startTime;
+
+              let from: number;
+              let to: number;
+              let progress: number;
+
+              if (skipPhase1) {
+                from = startY;
+                to = scrollBottom;
+                progress = Math.min(elapsed / totalDuration, 1);
+              } else {
+                if (phase === 1) {
+                  from = startY;
+                  to = splitScroll;
+                  progress = Math.min(elapsed / 3000, 1);
+                } else {
+                  from = splitScroll;
+                  to = scrollBottom;
+                  progress = Math.min(elapsed / 2000, 1);
                 }
-                return;
               }
 
-              const skipPhase1 = currentFrame >= 125;
-              const splitScroll = skipPhase1 ? scrollBottom : containerTop + totalDistance * splitRatio;
-              const totalDuration = skipPhase1 ? 3000 : 5000;
+              const easedProgress = easeInOutCubic(progress);
+              window.scrollTo(0, from + (to - from) * easedProgress);
 
-              const easeInOutCubic = (t: number) =>
-                t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+              if (progress < 1) {
+                scrollAnimRef.current = requestAnimationFrame(step);
+              } else if (!skipPhase1 && phase === 1) {
+                phase = 2;
+                startTime = timestamp;
+                scrollAnimRef.current = requestAnimationFrame(step);
+              } else {
+                animatingRef.current = false;
+                setArrowVisible(true);
+                onAnimatingChange?.(false);
+              }
+            };
 
-              let startTime: number | null = null;
-              let phase: 1 | 2 = 1;
-
-              const step = (timestamp: number) => {
-                if (!startTime) startTime = timestamp;
-                const elapsed = timestamp - startTime;
-
-                let from: number;
-                let to: number;
-                let progress: number;
-
-                if (skipPhase1) {
-                  from = startY;
-                  to = scrollBottom;
-                  progress = Math.min(elapsed / totalDuration, 1);
-                } else {
-                  if (phase === 1) {
-                    from = startY;
-                    to = splitScroll;
-                    progress = Math.min(elapsed / 3000, 1);
-                  } else {
-                    from = splitScroll;
-                    to = scrollBottom;
-                    progress = Math.min(elapsed / 2000, 1);
-                  }
-                }
-
-                const easedProgress = easeInOutCubic(progress);
-                window.scrollTo(0, from + (to - from) * easedProgress);
-
-                if (progress < 1) {
-                  scrollAnimRef.current = requestAnimationFrame(step);
-                } else if (!skipPhase1 && phase === 1) {
-                  phase = 2;
-                  startTime = timestamp;
-                  scrollAnimRef.current = requestAnimationFrame(step);
-                } else {
-                  animatingRef.current = false;
-                  setArrowVisible(true);
-                  onAnimatingChange?.(false);
-                }
-              };
-
-              animatingRef.current = true;
-              setArrowVisible(false);
-              onAnimatingChange?.(true);
-              scrollAnimRef.current = requestAnimationFrame(step);
-            }}
-            className="absolute bottom-10 left-1/2 z-20 -translate-x-1/2 animate-bounce cursor-pointer bg-transparent border-0 p-0"
+            animatingRef.current = true;
+            setArrowVisible(false);
+            onAnimatingChange?.(true);
+            scrollAnimRef.current = requestAnimationFrame(step);
+          }}
+          className={`absolute bottom-10 left-1/2 z-20 -translate-x-1/2 cursor-pointer bg-transparent border-0 p-0 transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] animate-bounce ${
+            arrowVisible && !loading
+              ? 'opacity-100 scale-100 pointer-events-auto'
+              : 'opacity-0 scale-50 pointer-events-none'
+          }`}
+        >
+          <svg
+            width="40"
+            height="40"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="white"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="drop-shadow-lg opacity-80"
           >
-            <svg
-              width="40"
-              height="40"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="drop-shadow-lg opacity-80"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
-          </button>
-        )}
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
       </div>
     </div>
   );

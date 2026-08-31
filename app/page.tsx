@@ -4,11 +4,23 @@ import { useState } from 'react';
 import ScrollImageSequence from './components/ScrollImageSequence';
 import FloatingGrid from './components/FloatingGrid';
 import Navbar from './components/Navbar';
-import LoginPanel from './components/LoginPanel';
+import LoginPanel, { type UserInfo } from './components/LoginPanel';
 
 export default function Home() {
   const [loginOpen, setLoginOpen] = useState(false);
   const [heroAnimating, setHeroAnimating] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+
+  const handleLogin = (user: UserInfo) => {
+    setUserInfo(user);
+    setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    setUserInfo(null);
+    setIsLoggedIn(false);
+  };
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -17,12 +29,18 @@ export default function Home() {
         onLoginOpen={() => setLoginOpen(true)}
         contentFaded={loginOpen}
         heroAnimating={heroAnimating}
+        isLoggedIn={isLoggedIn}
+        userInfo={userInfo}
       />
 
       {/* Login slide-in panel */}
       <LoginPanel
         isOpen={loginOpen}
         onClose={() => setLoginOpen(false)}
+        isLoggedIn={isLoggedIn}
+        userInfo={userInfo}
+        onLogin={handleLogin}
+        onLogout={handleLogout}
       />
 
       {/* ===== Image-sequence scroll hero ===== */}

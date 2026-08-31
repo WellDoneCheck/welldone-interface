@@ -2,16 +2,25 @@
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import type { UserInfo } from './LoginPanel';
 
 interface NavbarProps {
   onLoginOpen: () => void;
   contentFaded: boolean;
   heroAnimating?: boolean;
+  isLoggedIn?: boolean;
+  userInfo?: UserInfo | null;
 }
 
 const NAV_ITEMS = ['水井辨識', '地圖檢視', '匯出', '歷史紀錄', '帳號管理'];
 
-export default function Navbar({ onLoginOpen, contentFaded, heroAnimating = false }: NavbarProps) {
+export default function Navbar({
+  onLoginOpen,
+  contentFaded,
+  heroAnimating = false,
+  isLoggedIn = false,
+  userInfo = null,
+}: NavbarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [scrolled, setScrolled] = useState(false);
@@ -57,7 +66,7 @@ export default function Navbar({ onLoginOpen, contentFaded, heroAnimating = fals
 
   const style = inKove
     ? {
-        navBg: 'bg-white/70 backdrop-blur-md shadow-lg',
+        navBg: '',
         textColor: 'text-black',
         linkColor: 'text-black/80 hover:text-black',
         hamburgerColor: 'bg-black',
@@ -65,7 +74,7 @@ export default function Navbar({ onLoginOpen, contentFaded, heroAnimating = fals
       }
     : {
         // navBg: scrolled ? 'bg-black/60 backdrop-blur-md shadow-lg' : 'bg-transparent',
-        navBg: scrolled ? 'bg-black/20 shadow-lg ' : 'bg-transparent',
+        navBg: scrolled ? '' : 'bg-transparent',
         textColor: 'text-white',
         linkColor: 'text-white/90 hover:text-white',
         hamburgerColor: 'bg-white',
@@ -81,32 +90,34 @@ export default function Navbar({ onLoginOpen, contentFaded, heroAnimating = fals
       <div className={`flex items-center justify-between px-6 transition-all duration-300 md:px-8 ${style.pyClass}`}>
         {/* Logo */}
         <button type="button" onClick={handleLogoClick} className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-0 p-0">
-          <div className="h-8 w-8 rounded-md bg-[#68B9A5]" />
+          <div className="h-8 w-8 rounded-md bg-[#62A4A7]" />
           <span
             className={`text-4xl font-bold tracking-wide transition-colors duration-500 ${style.textColor}`}
             style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}
           >
-            <span className="text-[#68B9A5]">Sky</span>
+            <span className="text-[#62A4A7]">Sky</span>
             <span className={inKove ? 'text-gray-900' : 'text-white'}>Well</span>
           </span>
         </button>
 
-        {/* Desktop nav links */}
-        <div className="hidden md:flex items-center gap-12">
-          {NAV_ITEMS.map((item) => (
-            <a
-              key={item}
-              href="#"
-              className={`text-2xl font-semibold transition-all duration-500 ${style.linkColor} ${
-                contentFaded ? 'opacity-0 translate-y-[-8px]' : 'opacity-100 translate-y-0'
-              }`}
-            >
-              {item}
-            </a>
-          ))}
-        </div>
+        {/* Desktop nav links — only when logged in */}
+        {isLoggedIn && (
+          <div className="hidden md:flex items-center gap-12">
+            {NAV_ITEMS.map((item) => (
+              <a
+                key={item}
+                href="#"
+                className={`text-2xl font-semibold transition-all duration-500 ${style.linkColor} ${
+                  contentFaded ? 'opacity-0 translate-y-[-8px]' : 'opacity-100 translate-y-0'
+                }`}
+              >
+                {item}
+              </a>
+            ))}
+          </div>
+        )}
 
-        {/* Right side: login + hamburger */}
+        {/* Right side: login/user + hamburger */}
         <div className="flex items-center gap-6">
           <button
             type="button"
@@ -115,8 +126,24 @@ export default function Navbar({ onLoginOpen, contentFaded, heroAnimating = fals
               contentFaded ? 'opacity-0 translate-y-[-8px]' : 'opacity-100 translate-y-0'
             }`}
           >
-            登入
+            {isLoggedIn ? (
+              <span className="text-xl font-bold text-white">
+                {userInfo?.name ?? 'User'}
+              </span>
+            ) : (
+              <span className="text-2xl font-bold text-white">
+                登入
+              </span>
+            )}
           </button>
+
+              {/* 
+              <span className="flex h-8 w-8 items-center justify-center bg-white/20">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+              </span> */}
 
           {/* Hamburger — mobile only */}
           <button
@@ -152,7 +179,7 @@ export default function Navbar({ onLoginOpen, contentFaded, heroAnimating = fals
         }`}
       >
         <div className="px-6 pb-6 pt-2 space-y-1 bg-black/70 backdrop-blur-md">
-          {NAV_ITEMS.map((item) => (
+          {isLoggedIn && NAV_ITEMS.map((item) => (
             <a
               key={item}
               href="#"

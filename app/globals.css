@@ -3,6 +3,33 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+
+  /* SkyWell V4.2 design tokens (DESIGN.md §11) */
+  --bg-paper: #f7f6f1;
+  --bg-sunlit: #fbf9f4;
+  --surface: #ffffff;
+  --surface-muted: #f1efe9;
+  --ink: #2c322f;
+  --ink-soft: #6f7468;
+  --brand: #62a4a7;
+  --brand-ink: #3f7a7e;
+  --mint: #d1e6e7;
+  --amber: #d9a441;
+  --amber-ink: #8a611c;
+  --amber-soft: #f8ebd1;
+  --red: #bc5646;
+  --red-ink: #98412f;
+  --red-soft: #f7e5df;
+  --white: #ffffff;
+  --hairline: 1px solid rgba(229, 226, 217, 0.9);
+  --brand-line: 1px solid rgba(98, 164, 167, 0.35);
+  --shadow-card: 0 12px 32px -8px rgba(58, 63, 58, 0.1), 0 4px 12px rgba(58, 63, 58, 0.04);
+  --shadow-float: 0 20px 50px -12px rgba(98, 164, 167, 0.18);
+  --shadow-brand-glow: 0 8px 28px -8px rgba(98, 164, 167, 0.35);
+  --shadow-focus: 0 0 0 3px rgba(98, 164, 167, 0.25);
+  --gradient-primary: linear-gradient(135deg, #6daeb1 0%, #54999d 100%);
+  --gradient-paper-strata: linear-gradient(180deg, #fbf9f4 0%, #f7f6f1 55%, #f1efe9 100%);
+  --ease-expo: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @theme inline {
