@@ -8,9 +8,6 @@ interface ScrollImageSequenceProps {
   scrollHeight?: number;
   className?: string;
   onAnimatingChange?: (animating: boolean) => void;
-  loop?: boolean;
-  text?: string | null;
-  mask?: boolean;
 }
 
 export default function ScrollImageSequence({
@@ -19,16 +16,16 @@ export default function ScrollImageSequence({
   scrollHeight = 400,
   className,
   onAnimatingChange,
-  loop = false,
-  text = 'AI水井辨識系統',
-  mask = true,
 }: ScrollImageSequenceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
   const maskImgRef = useRef<HTMLImageElement>(null);
+  const maskLayerRef = useRef<HTMLDivElement>(null);
   const animRef = useRef<number>(0);
   const lastFrameRef = useRef<number>(-1);
+  const pendingFrameRef = useRef<number>(-1);
   const frameCacheRef = useRef<Map<number, HTMLImageElement>>(new Map);
+  const decodedFramesRef = useRef<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [loadProgress, setLoadProgress] = useState(0);
   const gradientRef = useRef<HTMLDivElement>(null);
@@ -60,37 +57,75 @@ export default function ScrollImageSequence({
     [getUrl, totalFrames],
   );
 
+  const applySrc = useCallback((index: number, img: HTMLImageElement) => {
+    if (imgRef.current && imgRef.current.src !== img.src) {
+      imgRef.current.src = img.src;
+      if (maskImgRef.current) maskImgRef.current.src = img.src;
+    }
+    if (lastFrameRef.current === index) decodedFramesRef.current.add(index);
+  }, []);
+
+  // Async off-main-thread decode; the DOM img picks the frame up from the
+  // shared decode cache, so a frame swap never blocks the main thread.
+  const decodeFrame = useCallback(
+    (frameIndex: number) => {
+      if (decodedFramesRef.current.has(frameIndex)) return;
+      const cached = frameCacheRef.current.get(frameIndex);
+      if (!cached || !cached.complete || cached.naturalWidth === 0) return;
+      cached
+        .decode()
+        .then(() => {
+          decodedFramesRef.current.add(frameIndex);
+          if (pendingFrameRef.current === frameIndex) applySrc(frameIndex, cached);
+        })
+        .catch(() => {});
+    },
+    [applySrc],
+  );
+
   const showFrame = useCallback(
     (frameIndex: number) => {
       if (frameIndex === lastFrameRef.current) return;
       lastFrameRef.current = frameIndex;
+      pendingFrameRef.current = frameIndex;
 
-      const img = imgRef.current;
-      if (img) {
         const cached = frameCacheRef.current.get(frameIndex);
         if (cached && cached.complete && cached.naturalWidth > 0) {
-          img.src = cached.src;
-          if (maskImgRef.current) maskImgRef.current.src = cached.src;
+        if (decodedFramesRef.current.has(frameIndex)) {
+          applySrc(frameIndex, cached);
+        } else {
+          decodeFrame(frameIndex);
+        }
+      } else if (cached) {
+        const onLoad = () => {
+          cached.removeEventListener('load', onLoad);
+          if (lastFrameRef.current === frameIndex) {
+            applySrc(frameIndex, cached);
+            decodeFrame(frameIndex);
+          }
+        };
+        if (cached.complete) onLoad();
+        else cached.addEventListener('load', onLoad);
         } else {
           const newImg = cacheImage(frameCacheRef.current, framePattern, frameIndex);
           if (newImg) {
             const onLoad = () => {
               newImg.removeEventListener('load', onLoad);
-              if (lastFrameRef.current === frameIndex && imgRef.current) {
-                imgRef.current.src = newImg.src;
-                if (maskImgRef.current) maskImgRef.current.src = newImg.src;
+            if (lastFrameRef.current === frameIndex) {
+              applySrc(frameIndex, newImg);
+              decodeFrame(frameIndex);
               }
             };
             if (newImg.complete) onLoad();
             else newImg.addEventListener('load', onLoad);
-          }
         }
       }
 
       for (let i = 1; i <= 8; i++) cacheImage(frameCacheRef.current, framePattern, frameIndex + i);
       for (let i = 1; i <= 2; i++) cacheImage(frameCacheRef.current, framePattern, frameIndex - i);
+      for (let i = 0; i <= 4; i++) decodeFrame(frameIndex + i);
     },
-    [cacheImage, framePattern],
+    [cacheImage, decodeFrame, applySrc, framePattern],
   );
 
   // Scroll handler
@@ -107,11 +142,7 @@ export default function ScrollImageSequence({
           const vh = window.innerHeight;
           const totalScroll = rect.height - vh;
           const scrolled = -rect.top;
-          const rawProgress = Math.max(0, scrolled / totalScroll);
-          const loopCount = loop ? 3 : 1;
-          const progress = loop
-            ? (rawProgress * loopCount) % 1
-            : Math.min(1, rawProgress);
+          const progress = Math.max(0, Math.min(1, scrolled / totalScroll));
           const frame = Math.min(totalFrames - 1, Math.floor(progress * totalFrames));
 
           showFrame(frame);
@@ -240,31 +271,28 @@ export default function ScrollImageSequence({
         )}
 
         {/* Layer 2: Text */}
-        {text && (
-          <div
-            ref={textRef}
-            className="absolute inset-0 z-[12] flex items-start justify-center pointer-events-none will-change-transform"
-            style={{ paddingTop: '18vh' }}
+        <div
+          ref={textRef}
+          className="absolute inset-0 z-[12] flex items-start justify-center pointer-events-none will-change-transform"
+          style={{ paddingTop: '18vh' }}
+        >
+          <h1
+            className="text-center font-black"
+            style={{
+              fontFamily: 'var(--font-noto-serif-tc), serif',
+              fontSize: 'clamp(60px, 12.3vw, 330px)',
+              lineHeight: '1.17',
+              color: '#D1E6E7',
+              width: '95%',
+              textAlign: 'center',
+              textShadow: '0 2px 40px rgba(0,0,0,0.15)',
+            }}
           >
-            <h1
-              className="text-center font-black"
-              style={{
-                fontFamily: 'var(--font-noto-serif-tc), serif',
-                fontSize: 'clamp(60px, 12.3vw, 330px)',
-                lineHeight: '1.17',
-                color: '#D1E6E7',
-                width: '95%',
-                textAlign: 'center',
-                textShadow: '0 2px 40px rgba(0,0,0,0.15)',
-              }}
-            >
-              {text}
-            </h1>
-          </div>
-        )}
+            AI水井辨識系統
+          </h1>
+        </div>
 
         {/* Layer 3: masked video — reveals the text behind it */}
-        {mask && (
         <div className="absolute inset-0 z-[12] overflow-hidden select-none pointer-events-none">
           <img
             ref={maskImgRef}
@@ -303,7 +331,6 @@ export default function ScrollImageSequence({
             />
           )}
         </div>
-        )}
 
         {/* Loading overlay */}
         {loading && (
@@ -320,100 +347,107 @@ export default function ScrollImageSequence({
           </div>
         )}
 
-        {/* Floating scroll-down arrow — pop-in / pop-out animation */}
-        <button
-          type="button"
-          onClick={() => {
-            const container = containerRef.current;
-            if (!container) return;
-            const vh = window.innerHeight;
-            const containerTop = container.offsetTop;
-            const rect = container.getBoundingClientRect();
-            const totalScroll = rect.height - vh;
-            const scrollBottom = containerTop + totalScroll;
-            const startY = window.scrollY;
-            const totalDistance = scrollBottom - containerTop;
+        {/* Floating scroll-down arrow — hidden when at last frame */}
+        {arrowVisible && !loading && (
+          <button
+            type="button"
+            onClick={() => {
+              const container = containerRef.current;
+              if (!container) return;
+              const vh = window.innerHeight;
+              const containerTop = container.offsetTop;
+              const rect = container.getBoundingClientRect();
+              const totalScroll = rect.height - vh;
+              const scrollBottom = containerTop + totalScroll;
+              const startY = window.scrollY;
 
-            // Already at bottom → scroll to next section
-            if (startY >= scrollBottom - 10) {
-              const nextSection = container.nextElementSibling as HTMLElement;
-              if (nextSection) {
-                window.scrollTo({ top: nextSection.offsetTop, behavior: 'smooth' });
-              }
-              return;
-            }
+              const splitRatio = 125 / totalFrames;
+              const totalDistance = scrollBottom - containerTop;
+              const currentFrame = totalDistance > 0
+                ? Math.floor(((startY - containerTop) / totalDistance) * totalFrames)
+                : 0;
 
-            // Time-based auto-scroll proportional to scroll height
-            // Speed: ~3s per 400vh of scroll distance
-            const totalDuration = Math.max(2000, (totalDistance / vh) * 3000);
-            const phase1Duration = totalDuration * 0.4;
-            const phase2Duration = totalDuration * 0.6;
-
-            const easeInOutCubic = (t: number) =>
-              t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-            let startTime: number | null = null;
-            let phase: 1 | 2 = 1;
-
-            const step = (timestamp: number) => {
-              if (!startTime) startTime = timestamp;
-              const elapsed = timestamp - startTime;
-
-              let from: number;
-              let to: number;
-              let progress: number;
-
-              if (phase === 1) {
-                from = startY;
-                to = startY + totalDistance * 0.3;
-                progress = Math.min(elapsed / phase1Duration, 1);
-              } else {
-                from = startY + totalDistance * 0.3;
-                to = scrollBottom;
-                progress = Math.min(elapsed / phase2Duration, 1);
+              // If already at/near bottom, scroll to next section
+              if (currentFrame >= totalFrames - 1 || startY >= scrollBottom - 10) {
+                const nextSection = container.nextElementSibling as HTMLElement;
+                if (nextSection) {
+                  window.scrollTo({ top: nextSection.offsetTop, behavior: 'smooth' });
+                }
+                return;
               }
 
-              const easedProgress = easeInOutCubic(progress);
-              window.scrollTo(0, from + (to - from) * easedProgress);
+              const skipPhase1 = currentFrame >= 125;
+              const splitScroll = skipPhase1 ? scrollBottom : containerTop + totalDistance * splitRatio;
+              const totalDuration = skipPhase1 ? 3000 : 5000;
 
-              if (progress < 1) {
-                scrollAnimRef.current = requestAnimationFrame(step);
-              } else if (phase === 1) {
-                phase = 2;
-                startTime = timestamp;
-                scrollAnimRef.current = requestAnimationFrame(step);
-              } else {
-                animatingRef.current = false;
-                setArrowVisible(true);
-                onAnimatingChange?.(false);
-              }
-            };
+              const easeInOutCubic = (t: number) =>
+                t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
-            animatingRef.current = true;
-            setArrowVisible(false);
-            onAnimatingChange?.(true);
-            scrollAnimRef.current = requestAnimationFrame(step);
-          }}
-          className={`absolute bottom-10 left-1/2 z-20 -translate-x-1/2 cursor-pointer bg-transparent border-0 p-0 transition-all duration-300 ease-[cubic-bezier(0.34,1.56,0.64,1)] animate-bounce ${
-            arrowVisible && !loading
-              ? 'opacity-100 scale-100 pointer-events-auto'
-              : 'opacity-0 scale-50 pointer-events-none'
-          }`}
-        >
-          <svg
-            width="40"
-            height="40"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="white"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="drop-shadow-lg opacity-80"
+              let startTime: number | null = null;
+              let phase: 1 | 2 = 1;
+
+              const step = (timestamp: number) => {
+                if (!startTime) startTime = timestamp;
+                const elapsed = timestamp - startTime;
+
+                let from: number;
+                let to: number;
+                let progress: number;
+
+                if (skipPhase1) {
+                  from = startY;
+                  to = scrollBottom;
+                  progress = Math.min(elapsed / totalDuration, 1);
+                } else {
+                  if (phase === 1) {
+                    from = startY;
+                    to = splitScroll;
+                    progress = Math.min(elapsed / 3000, 1);
+                  } else {
+                    from = splitScroll;
+                    to = scrollBottom;
+                    progress = Math.min(elapsed / 2000, 1);
+                  }
+                }
+
+                const easedProgress = easeInOutCubic(progress);
+                window.scrollTo(0, from + (to - from) * easedProgress);
+
+                if (progress < 1) {
+                  scrollAnimRef.current = requestAnimationFrame(step);
+                } else if (!skipPhase1 && phase === 1) {
+                  phase = 2;
+                  startTime = timestamp;
+                  scrollAnimRef.current = requestAnimationFrame(step);
+                } else {
+                  animatingRef.current = false;
+                  setArrowVisible(true);
+                  onAnimatingChange?.(false);
+                }
+              };
+
+              animatingRef.current = true;
+              setArrowVisible(false);
+              onAnimatingChange?.(true);
+              scrollAnimRef.current = requestAnimationFrame(step);
+            }}
+            className="absolute bottom-10 left-1/2 z-20 -translate-x-1/2 animate-bounce cursor-pointer bg-transparent border-0 p-0"
           >
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
+            <svg
+              width="40"
+              height="40"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="white"
+              strokeWidth="2.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="drop-shadow-lg opacity-80"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

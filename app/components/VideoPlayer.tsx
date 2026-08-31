@@ -10,11 +10,45 @@ interface VideoPlayerProps {
 export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
   const [showControls, setShowControls] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync playing state with the video element
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    const syncPlaying = () => setPlaying(!video.paused);
+    video.addEventListener('play', syncPlaying);
+    video.addEventListener('pause', syncPlaying);
+    return () => {
+      video.removeEventListener('play', syncPlaying);
+      video.removeEventListener('pause', syncPlaying);
+    };
+  }, []);
+
+  // Play only when the section approaches the viewport; pause when it leaves
+  useEffect(() => {
+    const container = containerRef.current;
+    const video = videoRef.current;
+    if (!container || !video) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          video.play();
+        } else {
+          video.pause();
+        }
+      },
+      { rootMargin: '150% 0px 150% 0px' },
+    );
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
 
   // Track progress
   useEffect(() => {
@@ -58,10 +92,8 @@ export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
     if (!video) return;
     if (video.paused) {
       video.play();
-      setPlaying(true);
     } else {
       video.pause();
-      setPlaying(false);
     }
   }, []);
 
@@ -82,7 +114,7 @@ export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
         ref={videoRef}
         src={src}
         className="h-full w-full object-cover"
-        autoPlay
+        preload="none"
         loop
         muted
         playsInline
