@@ -5,15 +5,36 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 interface ScrollImageSequenceProps {
   totalFrames: number;
   framePattern: string;
+  // Scroll distance (vh) that plays the frames
   scrollHeight?: number;
+  // Extra scroll distance (vh) after the last frame that shrinks the map into a centered frame
+  shrinkHeight?: number;
   className?: string;
   onAnimatingChange?: (animating: boolean) => void;
 }
+
+// The map ends up at this fraction of the viewport, centered on a white background
+const SHRINK_END_SCALE = 0.515;
+// Wide aerial photo the last frame cross-fades into while shrinking (loaded near the end of the frames)
+const SHRINK_IMAGE = '/aerial-bg.png';
+const SHRINK_IMAGE_PRELOAD_PROGRESS = 0.8;
+// Scrolling holds still this long once the map has finished shrinking (going down),
+// then glides on into the photo wall by itself over SHRINK_EXIT_MS
+const SHRINK_DWELL_MS = 1000;
+const SHRINK_EXIT_MS = 1600;
+const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ']);
+// Navbar switches to dark text once the shrink passes this point
+const NAV_LIGHT_THRESHOLD = 0.25;
+
+const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+// Gentler than cubic (no steep middle): used for the scroll-driven shrink so it never feels rushed
+const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
 
 export default function ScrollImageSequence({
   totalFrames,
   framePattern,
   scrollHeight = 400,
+  shrinkHeight = 100,
   className,
   onAnimatingChange,
 }: ScrollImageSequenceProps) {
@@ -31,6 +52,9 @@ export default function ScrollImageSequence({
   const gradientRef = useRef<HTMLDivElement>(null);
   const maskGradientRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const scalerRef = useRef<HTMLDivElement>(null);
+  const shrinkImgRef = useRef<HTMLImageElement>(null);
   const [arrowVisible, setArrowVisible] = useState(true);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animatingRef = useRef(false);
@@ -140,9 +164,31 @@ export default function ScrollImageSequence({
 
           const rect = container.getBoundingClientRect();
           const vh = window.innerHeight;
-          const totalScroll = rect.height - vh;
+          const shrinkPx = (shrinkHeight / 100) * vh;
+          const totalScroll = rect.height - vh - shrinkPx;
           const scrolled = -rect.top;
           const progress = Math.max(0, Math.min(1, scrolled / totalScroll));
+
+          // After the last frame: shrink the map into a centered frame
+          const shrinkProgress = shrinkPx > 0 ? Math.max(0, Math.min(1, (scrolled - totalScroll) / shrinkPx)) : 0;
+          const scale = 1 - (1 - SHRINK_END_SCALE) * easeInOutSine(shrinkProgress);
+          if (scalerRef.current) scalerRef.current.style.transform = `scale(${scale})`;
+
+          // Cross-fade the last frame into the wide aerial photo while shrinking
+          const shrinkImg = shrinkImgRef.current;
+          if (shrinkImg) {
+            if (progress > SHRINK_IMAGE_PRELOAD_PROGRESS && !shrinkImg.getAttribute('src')) shrinkImg.src = SHRINK_IMAGE;
+            const fade = Math.max(0, Math.min(1, (shrinkProgress - 0.1) / 0.7));
+            shrinkImg.style.opacity = String(easeInOutSine(fade));
+          }
+
+          // Let the navbar know the stage is light (white) so it can use dark text
+          const stage = stageRef.current;
+          const navLight = String(shrinkProgress > NAV_LIGHT_THRESHOLD);
+          if (stage && stage.dataset.navLight !== navLight) {
+            stage.dataset.navLight = navLight;
+            window.dispatchEvent(new Event('scroll'));
+          }
           const frame = Math.min(totalFrames - 1, Math.floor(progress * totalFrames));
 
           showFrame(frame);
@@ -152,12 +198,9 @@ export default function ScrollImageSequence({
           if (gradientRef.current) gradientRef.current.style.opacity = String(gradientOpacity);
           if (maskGradientRef.current) maskGradientRef.current.style.opacity = String(gradientOpacity);
 
-          // Hide arrow during animation or when at last frame
-          if (animatingRef.current || frame >= totalFrames - 1) {
-            setArrowVisible(false);
-          } else {
-            setArrowVisible(true);
-          }
+          // Hide arrow during the auto-play and once the frames are done: from there scrolling flows
+          // through the shrink straight into the photo wall
+          setArrowVisible(!animatingRef.current && frame < totalFrames - 1);
 
           // Handle text animation
           const textEl = textRef.current;
@@ -191,12 +234,96 @@ export default function ScrollImageSequence({
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onScroll);
     };
-  }, [totalFrames, showFrame]);
+  }, [totalFrames, showFrame, shrinkHeight]);
 
+
+  // Dwell: once the shrink is complete (scrolling down), scrolling is held for SHRINK_DWELL_MS,
+  // then the page glides down into the photo wall unless the user takes over
+  useEffect(() => {
+    let lockedUntil = 0;
+    let lockY = 0;
+    let dwelled = false;
+    let lastY = window.scrollY;
+    let dwellTimer: ReturnType<typeof setTimeout> | undefined;
+    let glideFrame = 0;
+
+    const isLocked = () => performance.now() < lockedUntil;
+
+    const glideIntoNextSection = () => {
+      const next = containerRef.current?.nextElementSibling as HTMLElement | null;
+      if (!next || window.scrollY !== lockY) return;
+      const from = window.scrollY;
+      const to = next.offsetTop;
+      const startedAt = performance.now();
+      const step = (now: number) => {
+        const progress = Math.min((now - startedAt) / SHRINK_EXIT_MS, 1);
+        window.scrollTo(0, from + (to - from) * easeInOutSine(progress));
+        if (progress < 1) glideFrame = requestAnimationFrame(step);
+      };
+      glideFrame = requestAnimationFrame(step);
+    };
+
+    // The user scrolling takes over from the automatic glide
+    const takeOver = () => {
+      if (!isLocked()) cancelAnimationFrame(glideFrame);
+    };
+
+    const onScroll = () => {
+      const container = containerRef.current;
+      if (!container || shrinkHeight <= 0) return;
+      const y = window.scrollY;
+
+      if (isLocked()) {
+        if (y !== lockY) window.scrollTo(0, lockY);
+        return;
+      }
+
+      const shrinkPx = (shrinkHeight / 100) * window.innerHeight;
+      const shrinkEnd = container.offsetTop + container.offsetHeight - window.innerHeight;
+      if (y < shrinkEnd - shrinkPx * 0.05) dwelled = false; // scrolled back up: hold again next time
+      const arrivedGoingDown = y > lastY && y >= shrinkEnd;
+      lastY = y;
+
+      if (!dwelled && arrivedGoingDown) {
+        dwelled = true;
+        lockY = shrinkEnd;
+        lockedUntil = performance.now() + SHRINK_DWELL_MS;
+        window.scrollTo(0, lockY);
+        lastY = lockY;
+        dwellTimer = setTimeout(glideIntoNextSection, SHRINK_DWELL_MS);
+      }
+    };
+
+    const block = (event: Event) => {
+      if (isLocked()) event.preventDefault();
+      else takeOver();
+    };
+    const blockKeys = (event: KeyboardEvent) => {
+      if (!SCROLL_KEYS.has(event.key)) return;
+      if (isLocked()) event.preventDefault();
+      else takeOver();
+    };
+
+    window.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('wheel', block, { passive: false });
+    window.addEventListener('touchstart', takeOver, { passive: true });
+    window.addEventListener('touchmove', block, { passive: false });
+    window.addEventListener('keydown', blockKeys);
+    return () => {
+      clearTimeout(dwellTimer);
+      cancelAnimationFrame(glideFrame);
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('wheel', block);
+      window.removeEventListener('touchstart', takeOver);
+      window.removeEventListener('touchmove', block);
+      window.removeEventListener('keydown', blockKeys);
+    };
+  }, [shrinkHeight]);
 
   // Cancel animation on user interaction (wheel / touch)
   useEffect(() => {
     const cancelAnim = () => {
+      cancelAnimationFrame(scrollAnimRef.current);
       if (animatingRef.current) {
         animatingRef.current = false;
         cancelAnimationFrame(scrollAnimRef.current);
@@ -250,8 +377,14 @@ export default function ScrollImageSequence({
   }, [totalFrames, cacheImage, framePattern, showFrame]);
 
   return (
-    <div ref={containerRef} className={`relative ${className ?? ''}`}>
-      <div className="sticky top-0 h-screen w-full overflow-hidden bg-black">
+    <div
+      ref={containerRef}
+      className={`relative ${className ?? ''}`}
+      style={{ height: `${scrollHeight + shrinkHeight}vh` }}
+    >
+      <div ref={stageRef} data-nav-light="false" className="sticky top-0 h-screen w-full overflow-hidden bg-white">
+        {/* Everything below except the loader and arrow shrinks together */}
+        <div ref={scalerRef} className="absolute inset-0 will-change-transform">
         {/* Layer 1: Video frames */}
         <img
           ref={imgRef}
@@ -332,6 +465,16 @@ export default function ScrollImageSequence({
           )}
         </div>
 
+
+        {/* Layer 4: wide aerial photo, fades in while the map shrinks */}
+        <img
+          ref={shrinkImgRef}
+          alt=""
+          draggable={false}
+          className="pointer-events-none absolute inset-0 z-[13] h-full w-full select-none object-cover opacity-0"
+        />
+        </div>
+
         {/* Loading overlay */}
         {loading && (
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black text-white">
@@ -357,7 +500,8 @@ export default function ScrollImageSequence({
               const vh = window.innerHeight;
               const containerTop = container.offsetTop;
               const rect = container.getBoundingClientRect();
-              const totalScroll = rect.height - vh;
+              const shrinkPx = (shrinkHeight / 100) * vh;
+              const totalScroll = rect.height - vh - shrinkPx;
               const scrollBottom = containerTop + totalScroll;
               const startY = window.scrollY;
 
@@ -379,9 +523,6 @@ export default function ScrollImageSequence({
               const skipPhase1 = currentFrame >= 125;
               const splitScroll = skipPhase1 ? scrollBottom : containerTop + totalDistance * splitRatio;
               const totalDuration = skipPhase1 ? 3000 : 5000;
-
-              const easeInOutCubic = (t: number) =>
-                t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 
               let startTime: number | null = null;
               let phase: 1 | 2 = 1;

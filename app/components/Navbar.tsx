@@ -12,7 +12,16 @@ interface NavbarProps {
   userInfo?: UserInfo | null;
 }
 
-const NAV_ITEMS = ['水井辨識', '地圖檢視', '匯出', '歷史紀錄', '帳號管理'];
+const NAV_ITEMS = ['水井辨識', '地圖檢視', '匯入', '匯出', '歷史紀錄', '監控總覽', '帳號管理'];
+const NAV_ROUTES: Record<string, string> = {
+  '水井辨識': '/',
+  '地圖檢視': '/map',
+  '匯入': '/upload',
+  '匯出': '/',
+  '歷史紀錄': '/',
+  '監控總覽': '/monitor',
+  '帳號管理': '/',
+};
 
 export default function Navbar({
   onLoginOpen,
@@ -41,10 +50,14 @@ export default function Navbar({
       setScrolled(window.scrollY > 50);
       // Detect Kove section: find its top position relative to the document
       const section = document.querySelector('[data-section="kove"]');
+      // The hero stage turns white once the map has shrunk
+      const heroIsLight = document.querySelector('[data-nav-light="true"]') !== null;
       if (section) {
         const rect = section.getBoundingClientRect();
         // Turn black when the Kove section top reaches the middle of the viewport
-        setInKove(rect.top < window.innerHeight * 0.5);
+        setInKove(heroIsLight || rect.top < window.innerHeight * 0.5);
+      } else {
+        setInKove(heroIsLight);
       }
     };
     window.addEventListener('scroll', onScroll, { passive: true });
@@ -106,7 +119,12 @@ export default function Navbar({
             {NAV_ITEMS.map((item) => (
               <a
                 key={item}
-                href="#"
+                href={NAV_ROUTES[item] || '#'}
+                onClick={(e) => {
+                  e.preventDefault();
+                  const route = NAV_ROUTES[item];
+                  if (route) router.push(route);
+                }}
                 className={`text-2xl font-semibold transition-all duration-500 ${style.linkColor} ${
                   contentFaded ? 'opacity-0 translate-y-[-8px]' : 'opacity-100 translate-y-0'
                 }`}
@@ -182,8 +200,13 @@ export default function Navbar({
           {isLoggedIn && NAV_ITEMS.map((item) => (
             <a
               key={item}
-              href="#"
-              onClick={() => setMobileOpen(false)}
+              href={NAV_ROUTES[item] || '#'}
+              onClick={(e) => {
+                e.preventDefault();
+                setMobileOpen(false);
+                const route = NAV_ROUTES[item];
+                if (route) router.push(route);
+              }}
               className="block rounded-lg px-4 py-3 text-lg font-medium text-white/90 hover:bg-white/10 hover:text-white transition-colors"
             >
               {item}

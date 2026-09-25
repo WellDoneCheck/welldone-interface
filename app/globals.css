@@ -62,3 +62,71 @@ body {
     transform: translateX(0);
   }
 }
+
+/* 頂部年份指示器：捲動方向決定滑入/滑出方向 */
+@keyframes yearOutUp {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(-100%); opacity: 0; }
+}
+@keyframes yearInUp {
+  from { transform: translateY(100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+@keyframes yearOutDown {
+  from { transform: translateY(0); opacity: 1; }
+  to { transform: translateY(100%); opacity: 0; }
+}
+@keyframes yearInDown {
+  from { transform: translateY(-100%); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* 清單年份標題進入作用中狀態時的呼應光暈 */
+@keyframes yearHeadingPulse {
+  0% { box-shadow: 0 0 0 rgba(98, 164, 167, 0); }
+  35% { box-shadow: 0 0 24px 4px rgba(98, 164, 167, 0.35); }
+  100% { box-shadow: 0 0 0 rgba(98, 164, 167, 0); }
+}
+
+/* 頂部年份指示器淡入動畫 */
+@keyframes yearFadeIn {
+  0% { opacity: 0; transform: translateY(12px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* 匯入頁右側清單捲軸：37px 欄位內置中 6px 圓角軌道（Figma scroll-indicator） */
+.scroll-indicator::-webkit-scrollbar {
+  width: 37px;
+}
+.scroll-indicator::-webkit-scrollbar-track,
+.scroll-indicator::-webkit-scrollbar-thumb {
+  border: solid transparent;
+  border-width: 0 15.5px;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+.scroll-indicator::-webkit-scrollbar-track {
+  background-color: #e5e7eb;
+}
+.scroll-indicator::-webkit-scrollbar-thumb {
+  background-color: #111827;
+}
+
+/* 帳號面板字級 fs-<設計稿px>：依 --type 縮小，且不小於 --min-text（皆由 LoginPanel 設定） */
+@utility fs-* {
+  font-size: max(calc(--value(integer) * 1px * var(--type, 1)), var(--min-text, 0px));
+}
+
+/* 地圖頁立體圖假渲染 */
+@keyframes floatY {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+@keyframes drawStroke {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes scanDown {
+  from { top: 0; }
+  to { top: 100%; }
+}

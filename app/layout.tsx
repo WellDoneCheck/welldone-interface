@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono, Noto_Serif_TC } from 'next/font/google';
 import './globals.css';
+import SiteChrome from './components/SiteChrome';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 const notoSerifTC = Noto_Serif_TC({
   variable: '--font-noto-serif-tc',
   subsets: ['latin'],
-  weight: ['900'],
+  weight: ['400', '500', '700', '900'],
 });
 
 
@@ -43,7 +44,7 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col">
-        {children}
+        <SiteChrome>{children}</SiteChrome>
       </body>
     </html>
   );

@@ -1,20 +1,50 @@
 'use client';
 
-import { useRef, useState, useEffect, useCallback } from 'react';
+import { useRef, useState, useEffect, useCallback, type KeyboardEvent, type MouseEvent } from 'react';
 
 interface VideoPlayerProps {
   src: string;
   className?: string;
 }
 
+const CONTROLS_HIDE_MS = 4000;
+const SEEK_STEP_SECONDS = 5;
+
+// 75 -> '1:15'; unknown length -> '--:--'
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return '--:--';
+  const whole = Math.floor(seconds);
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
+}
+
+function PlayIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M8 5v14l11-7z" />
+    </svg>
+  );
+}
+
+function PauseIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    </svg>
+  );
+}
+
 export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [playing, setPlaying] = useState(false);
-  const [progress, setProgress] = useState(0);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(NaN);
   const [showControls, setShowControls] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const progress = Number.isFinite(duration) && duration > 0 ? (currentTime / duration) * 100 : 0;
+  // Controls stay up while paused so the way to resume is always visible
+  const controlsVisible = showControls || !playing;
 
   // Sync playing state with the video element
   useEffect(() => {
@@ -50,155 +80,136 @@ export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
     return () => observer.disconnect();
   }, []);
 
-  // Track progress
+  // Track time and length
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
-    const onTimeUpdate = () => {
-      if (video.duration) {
-        setProgress((video.currentTime / video.duration) * 100);
-      }
-    };
+    const onTimeUpdate = () => setCurrentTime(video.currentTime);
+    const onMetadata = () => setDuration(video.duration);
 
     video.addEventListener('timeupdate', onTimeUpdate);
-    return () => video.removeEventListener('timeupdate', onTimeUpdate);
+    video.addEventListener('loadedmetadata', onMetadata);
+    if (video.readyState >= 1) onMetadata();
+    return () => {
+      video.removeEventListener('timeupdate', onTimeUpdate);
+      video.removeEventListener('loadedmetadata', onMetadata);
+    };
   }, []);
 
-  // Auto-hide controls after 4s
-  const scheduleHide = useCallback(() => {
+  // Auto-hide controls while playing
+  const revealControls = useCallback(() => {
+    setShowControls(true);
     if (hideTimer.current) clearTimeout(hideTimer.current);
-    hideTimer.current = setTimeout(() => setShowControls(false), 4000);
+    hideTimer.current = setTimeout(() => setShowControls(false), CONTROLS_HIDE_MS);
   }, []);
 
-  const handleMouseMove = useCallback(() => {
-    setShowControls(true);
-    scheduleHide();
-  }, [scheduleHide]);
-
-  const handleMouseEnter = useCallback(() => {
-    setIsHovered(true);
-    setShowControls(true);
-    scheduleHide();
-  }, [scheduleHide]);
-
-  const handleMouseLeave = useCallback(() => {
-    setIsHovered(false);
-    setShowControls(false);
+  useEffect(() => () => {
+    if (hideTimer.current) clearTimeout(hideTimer.current);
   }, []);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) {
-      video.play();
-    } else {
-      video.pause();
-    }
+    if (video.paused) video.play();
+    else video.pause();
   }, []);
 
-  const handleVideoClick = useCallback(() => {
-    togglePlay();
-  }, [togglePlay]);
+  const seekTo = useCallback((seconds: number) => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.duration)) return;
+    video.currentTime = Math.min(Math.max(seconds, 0), video.duration);
+  }, []);
+
+  const onTrackClick = (event: MouseEvent<HTMLDivElement>) => {
+    const { left, width } = event.currentTarget.getBoundingClientRect();
+    seekTo(((event.clientX - left) / width) * duration);
+  };
+
+  const onTrackKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    seekTo(currentTime + (event.key === 'ArrowRight' ? SEEK_STEP_SECONDS : -SEEK_STEP_SECONDS));
+  };
 
   return (
     <div
       ref={containerRef}
-      className={`relative overflow-hidden ${className}`}
-      onMouseMove={handleMouseMove}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      className={`relative overflow-hidden bg-[#2C322F] ${className}`}
+      onMouseMove={revealControls}
+      onMouseEnter={revealControls}
+      onMouseLeave={() => setShowControls(false)}
     >
-      {/* Video */}
       <video
         ref={videoRef}
         src={src}
         className="h-full w-full object-cover"
-        preload="none"
+        preload="metadata"
         loop
         muted
         playsInline
-        onClick={handleVideoClick}
+        onClick={togglePlay}
       />
 
-      {/* Subtle dark overlay on hover */}
+      {/* soft ink tint while the controls are up */}
       <div
-        className={`absolute inset-0 bg-black/20 transition-opacity duration-500 ${
-          showControls ? 'opacity-100' : 'opacity-0'
+        className={`pointer-events-none absolute inset-0 bg-[#2C322F]/25 transition-opacity duration-500 ${
+          controlsVisible ? 'opacity-100' : 'opacity-0'
         }`}
-        onClick={handleVideoClick}
       />
 
-      {/* Big play/pause icon when paused - centered */}
+      {/* big play button while paused */}
       {!playing && (
-        <div
-          className="absolute inset-0 flex items-center justify-center z-10"
-          onClick={handleVideoClick}
+        <button
+          type="button"
+          aria-label="播放影片"
+          onClick={togglePlay}
+          className="group absolute inset-0 z-10 flex cursor-pointer items-center justify-center outline-none"
         >
-          <div className="w-20 h-20 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center transition-all duration-300 hover:scale-110 hover:bg-black/50 shadow-2xl">
-            <svg
-              className="w-8 h-8 text-white ml-1"
-              fill="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path d="M8 5v14l11-7z" />
-            </svg>
-          </div>
-        </div>
+          <span className="flex h-[88px] w-[88px] items-center justify-center bg-[#62A4A7] text-white shadow-[var(--shadow-brand-glow)] transition-all duration-300 ease-[var(--ease-expo)] group-hover:scale-105 group-hover:bg-[#54999D] group-focus-visible:shadow-[var(--shadow-focus)]">
+            <PlayIcon className="ml-1 h-9 w-9" />
+          </span>
+        </button>
       )}
 
-      {/* Bottom controls bar */}
+      {/* control bar */}
       <div
-        className={`absolute bottom-0 left-0 right-0 transition-all duration-500 ${
-          showControls ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'
+        className={`absolute inset-x-0 bottom-0 z-20 flex items-center gap-4 border-t border-white/10 bg-[#2C322F]/90 px-4 py-3 transition-all duration-500 ease-[var(--ease-expo)] ${
+          controlsVisible ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-2 opacity-0'
         }`}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
       >
-        {/* Gradient backdrop */}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent" />
-        
-        <div className="relative px-6 pb-5 pt-12">
-          {/* Progress bar */}
-          <div 
-            className="w-full h-1 bg-white/20 rounded-full overflow-hidden mb-3 cursor-pointer group"
-            onClick={(e) => {
-              const video = videoRef.current;
-              if (!video) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              const pct = (e.clientX - rect.left) / rect.width;
-              video.currentTime = pct * video.duration;
-            }}
-          >
-            <div
-              className="h-full bg-gradient-to-r from-white/80 to-white rounded-full transition-all duration-100 group-hover:h-1.5"
-              style={{ width: `${progress}%` }}
+        <button
+          type="button"
+          aria-label={playing ? '暫停' : '播放'}
+          onClick={togglePlay}
+          className="flex h-9 w-9 shrink-0 items-center justify-center bg-[#62A4A7] text-white transition-colors duration-200 hover:bg-[#54999D] focus-visible:shadow-[var(--shadow-focus)] focus-visible:outline-none"
+        >
+          {playing ? <PauseIcon className="h-5 w-5" /> : <PlayIcon className="ml-0.5 h-5 w-5" />}
+        </button>
+
+        <span className="w-[92px] shrink-0 text-sm tabular-nums text-[#F7F6F1]/80" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
+          {formatTime(currentTime)} / {formatTime(duration)}
+        </span>
+
+        <div
+          role="slider"
+          tabIndex={0}
+          aria-label="播放進度"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress)}
+          aria-valuetext={`${formatTime(currentTime)} / ${formatTime(duration)}`}
+          onClick={onTrackClick}
+          onKeyDown={onTrackKeyDown}
+          className="group relative flex h-6 flex-1 cursor-pointer items-center outline-none"
+        >
+          <div className="relative h-[3px] w-full bg-white/25 transition-all duration-200 group-hover:h-[5px]">
+            <div className="h-full bg-[#62A4A7]" style={{ width: `${progress}%` }} />
+            <span
+              className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 bg-[#D1E6E7] shadow-[0_0_0_3px_rgba(98,164,167,0.35)] transition-opacity duration-200 group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:hover)]:opacity-0"
+              style={{ left: `${progress}%` }}
             />
-          </div>
-
-          {/* Controls row */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              {/* Play/Pause button */}
-              <button
-                onClick={togglePlay}
-                className="text-white/90 hover:text-white transition-all duration-200 hover:scale-110"
-              >
-                {playing ? (
-                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
-                  </svg>
-                ) : (
-                  <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M8 5v14l11-7z" />
-                  </svg>
-                )}
-              </button>
-
-              {/* Status text */}
-              <span className="text-white/50 text-sm font-medium">
-                {playing ? '播放中' : '已暫停'}
-              </span>
-            </div>
           </div>
         </div>
       </div>
