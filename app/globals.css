@@ -130,3 +130,181 @@ body {
   from { top: 0; }
   to { top: 100%; }
 }
+
+/* 頁面切換（view transition）：共用元素以網站的 expo 曲線移動，其餘交叉淡化 */
+::view-transition-group(*) {
+  animation-duration: 650ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 450ms;
+}@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* 地圖 ↔ 檢查頁的背景：以水井圖釘為中心推近／拉遠。
+   圖釘位置照地圖底圖（1958×1102，從左上角鋪滿視窗）上的百分比換算 */
+:root {
+  --map-image-width: max(100vw, calc(100vh * 1958 / 1102));
+  --well-focus: calc(var(--map-image-width) * 0.1956) calc(var(--map-image-width) * 0.145);
+}
+::view-transition-group(.zoom-to-well),
+::view-transition-group(.zoom-from-well) {
+  animation-duration: 850ms;
+}
+::view-transition-old(.zoom-to-well),
+::view-transition-new(.zoom-to-well),
+::view-transition-old(.zoom-from-well),
+::view-transition-new(.zoom-from-well) {
+  mix-blend-mode: normal;
+  animation-duration: 850ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  animation-fill-mode: both;
+}
+/* 往檢查頁：地圖朝圖釘放大並淡出，近拍稍微縮回定位 */
+::view-transition-old(.zoom-to-well) {
+  transform-origin: var(--well-focus);
+  animation-name: well-zoom-in-away;
+}
+::view-transition-new(.zoom-to-well) {
+  animation-name: well-close-up-arrive;
+}
+/* 回地圖：近拍淡出，地圖從圖釘處拉遠回全景 */
+::view-transition-old(.zoom-from-well) {
+  animation-name: well-close-up-leave;
+}
+::view-transition-new(.zoom-from-well) {
+  transform-origin: var(--well-focus);
+  animation-name: well-zoom-out-arrive;
+}
+@keyframes well-zoom-in-away {
+  to { transform: scale(2.6); opacity: 0; }
+}
+@keyframes well-close-up-arrive {
+  from { transform: scale(1.18); opacity: 0; }
+}
+@keyframes well-close-up-leave {
+  to { transform: scale(1.18); opacity: 0; }
+}
+@keyframes well-zoom-out-arrive {
+  from { transform: scale(2.6); opacity: 0; }
+}
+
+/* 導覽列在換頁轉場時保持不動：自成一層、不淡入淡出，並疊在背景推近等全螢幕轉場之上 */
+::view-transition-group(site-navbar) {
+  z-index: 50;
+  animation: none;
+}
+::view-transition-old(site-navbar) {
+  display: none;
+}
+::view-transition-new(site-navbar) {
+  animation: none;
+}
+
+/* 沒有對應元素的頁面部分（卡片外框、按鈕、年份片條…）：舊頁先淡出，新頁稍後淡入並上浮一點 */
+/* 只在該部分真的離開／出現時（另一頁沒有它）才動畫；兩頁都在的部分保持不動 */
+::view-transition-old(.page-part):only-child {
+  animation: page-part-out 260ms ease-in both;
+}
+::view-transition-new(.page-part):only-child {
+  animation: page-part-in 520ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both;
+}
+@keyframes page-part-out {
+  to { opacity: 0; }
+}
+@keyframes page-part-in {
+  from { opacity: 0; transform: translateY(14px); }
+}
+
+/* 沿軌跡移動的共用元素（見 SharedTransition 的 SHARED）疊在最前面：
+   高於背景推近與淡入淡出的頁面部分，只在導覽列（50）之下 */
+::view-transition-group(well-photo),
+::view-transition-group(well-id),
+::view-transition-group(well-coordinates),
+::view-transition-group(well-time),
+::view-transition-group(export-entry),
+::view-transition-group(compare-area),
+::view-transition-group(start-upload) {
+  z-index: 40;
+}
+
+/* 按鈕拉大成另一頁的區塊：地圖的「合法井比對」↔ 比對頁的面板（回地圖時縮回按鈕）、主頁的「開始使用」→ 上傳頁的上傳面板。
+   外框從按鈕拉大成區塊，舊內容先淡出、新內容隨後淡入；內容照原尺寸貼齊左上，不跟著外框拉伸 */
+::view-transition-group(compare-area),
+::view-transition-group(start-upload) {
+  animation-duration: 650ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+::view-transition-image-pair(compare-area),
+::view-transition-image-pair(start-upload) {
+  overflow: clip;
+  background: #f7f6f1;
+  box-shadow: 0 4px 20px 8px rgba(0, 0, 0, 0.35);
+}
+/* 上傳面板是白底 */
+::view-transition-image-pair(start-upload) {
+  background: #fff;
+}
+::view-transition-old(compare-area),
+::view-transition-new(compare-area),
+::view-transition-old(start-upload),
+::view-transition-new(start-upload) {
+  height: 100%;
+  object-fit: none;
+  object-position: left top;
+  mix-blend-mode: normal;
+  animation-duration: 650ms;
+  animation-fill-mode: both;
+}
+::view-transition-old(compare-area),
+::view-transition-old(start-upload) {
+  animation-name: grow-content-out;
+}
+::view-transition-new(compare-area),
+::view-transition-new(start-upload) {
+  animation-name: grow-content-in;
+}
+@keyframes grow-content-out {
+  30%, 100% { opacity: 0; }
+}
+@keyframes grow-content-in {
+  0%, 35% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+/* 上傳頁的地圖清單：進場時從畫面右側滑入就位；離場時跟其他頁面部分一樣淡出 */
+::view-transition-new(upload-records):only-child {
+  animation: records-slide-in 750ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
+}
+::view-transition-old(upload-records):only-child {
+  animation: page-part-out 260ms ease-in both;
+}
+@keyframes records-slide-in {
+  from { transform: translateX(100vw); }
+}
+
+/* 載入動畫（WellLoader）：水井漣漪、中心呼吸、跳動的點 */
+@keyframes well-ripple {
+  from { transform: scale(0.12); opacity: 1; }
+  to { transform: scale(1); opacity: 0; }
+}
+@keyframes well-core {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-50%, -50%) scale(0.82); }
+}
+@keyframes well-dot {
+  0%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-4px); opacity: 1; }
+}
+
+/* AI 助理：新訊息淡入上移 */
+@keyframes copilotMessageIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
+import { RECOGNITION_ACCURACY, WELL_TOTALS } from '../data/monitor';
 
 export default function FloatingGrid() {
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -60,20 +61,27 @@ export default function FloatingGrid() {
   return (
     <section 
       ref={sectionRef} 
-      className="relative w-full h-[250vh] bg-white text-black"
+      className="relative w-full h-[250vh] bg-[#F7F6F1] text-black"
       data-section="kove"
       style={{ zIndex: 5 }}
     >
       <div className="sticky top-0 h-screen w-full flex overflow-hidden">
         
-        <div className="w-1/2 h-full flex flex-col justify-center px-12 md:px-24 bg-white">
-          <h2 className="font-serif text-[12vw] italic leading-[0.8] tracking-tighter">
-            Kove
-          </h2>
-          <div className="mt-8 max-w-xs border-l-2 border-black/10 pl-6">
-            <p className="text-[10px] uppercase tracking-[0.3em] leading-relaxed opacity-50">
-              Independent Scroll / Layered Motion
-            </p>
+        <div className="w-1/2 h-full flex flex-col justify-center px-12 md:px-24 bg-[#F7F6F1]">
+          {/* the recognition accuracy, from the same figures as the monitor page */}
+          <div style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
+            <p className="text-xs font-bold uppercase tracking-[0.35em] text-[#3F7A7E]">AI Well Detection</p>
+            <h2 className="mt-4 text-[10vw] font-black leading-[0.85] tracking-tight text-[#2C322F]">
+              {RECOGNITION_ACCURACY}
+              <span className="text-[0.42em] text-[#62A4A7]">%</span>
+            </h2>
+            <p className="mt-4 text-[clamp(18px,1.7vw,30px)] font-bold text-[#2C322F]">水井辨識準確率</p>
+            <div className="mt-8 max-w-sm border-l-2 border-[#62A4A7]/50 pl-6">
+              <p className="text-[10px] uppercase tracking-[0.3em] leading-relaxed text-[#2C322F]/50">Aerial Imagery / Deep Learning</p>
+              <p className="mt-3 text-sm leading-relaxed text-[#6F7468]">
+                從空拍影像自動找出水井，已驗證 {WELL_TOTALS.verified.toLocaleString()} 口、待驗證 {WELL_TOTALS.pending} 口，加速合法水井的登記與清查。
+              </p>
+            </div>
           </div>
         </div>
 

@@ -8,7 +8,17 @@ import CopilotWidget from './CopilotWidget';
 interface SiteChromeContextValue {
   heroAnimating: boolean;
   setHeroAnimating: (animating: boolean) => void;
+  // opens the login panel, e.g. from the 401 page
+  openLogin: () => void;
+  isLoggedIn: boolean;
+  // runs `then` now when logged in; otherwise opens the login panel with a notice and runs `then` once logged in
+  requireLogin: (then: () => void) => void;
 }
+
+// Shown on the login panel when an action needs the user to log in first
+const LOGIN_REQUIRED_NOTICE = '請先登入，登入後將直接前往影像匯入與紀錄';
+// The login panel slides away this long; the pending action waits for it so a page transition starts on a clear page
+const LOGIN_PANEL_CLOSE_MS = 500;
 
 const SiteChromeContext = createContext<SiteChromeContextValue | null>(null);
 
@@ -23,9 +33,35 @@ export default function SiteChrome({ children }: { children: ReactNode }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const [heroAnimating, setHeroAnimating] = useState(false);
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
+  // what to do once the user has logged in (set by requireLogin); stored as a function, so wrapped in an object
+  const [afterLogin, setAfterLogin] = useState<{ run: () => void } | null>(null);
+
+  const requireLogin = (then: () => void) => {
+    if (userInfo) {
+      then();
+      return;
+    }
+    setAfterLogin({ run: then });
+    setLoginOpen(true);
+  };
+
+  const logIn = (user: UserInfo) => {
+    setUserInfo(user);
+    if (!afterLogin) return;
+    setLoginOpen(false);
+    setAfterLogin(null);
+    setTimeout(afterLogin.run, LOGIN_PANEL_CLOSE_MS);
+  };
+
+  const closeLogin = () => {
+    setLoginOpen(false);
+    setAfterLogin(null);
+  };
 
   return (
-    <SiteChromeContext value={{ heroAnimating, setHeroAnimating }}>
+    <SiteChromeContext
+      value={{ heroAnimating, setHeroAnimating, openLogin: () => setLoginOpen(true), isLoggedIn: userInfo !== null, requireLogin }}
+    >
       <Navbar
         onLoginOpen={() => setLoginOpen(true)}
         contentFaded={loginOpen}
@@ -35,10 +71,11 @@ export default function SiteChrome({ children }: { children: ReactNode }) {
       />
       <LoginPanel
         isOpen={loginOpen}
-        onClose={() => setLoginOpen(false)}
+        onClose={closeLogin}
+        notice={afterLogin ? LOGIN_REQUIRED_NOTICE : undefined}
         isLoggedIn={userInfo !== null}
         userInfo={userInfo}
-        onLogin={setUserInfo}
+        onLogin={logIn}
         onLogout={() => setUserInfo(null)}
       />
       {children}

@@ -13,6 +13,9 @@ export interface CopilotMessage {
 export const COPILOT_NAME = 'Skyhi';
 export const COPILOT_STATUS = 'AI 智能助理已上線';
 
+// Quick questions offered above the input, each matching a fake reply below
+export const COPILOT_SUGGESTIONS = ['水井辨識進度如何？', '如何匯出辨識結果？', '如何在地圖上查看位置？'];
+
 // The example conversation from the design
 export const SEED_MESSAGES: CopilotMessage[] = [
   {

@@ -4,85 +4,118 @@ import { useEffect, useRef, useState, type KeyboardEvent, type FormEvent } from 
 import Image from 'next/image';
 import { useCopilotChat } from './useCopilotChat';
 import { useFitScale, type FitStage } from './useFitScale';
-import { COPILOT_NAME, COPILOT_STATUS, type CopilotMessage } from '../data/copilot';
+import { COPILOT_NAME, COPILOT_STATUS, COPILOT_SUGGESTIONS, type CopilotMessage } from '../data/copilot';
 
 // Laid out for the 1920×1080 Figma frame and scaled to the viewport
 const STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY: 0, minViewportWidth: 0 };
-const RIGHT_OFFSET = 56;
-// Figma: 19px from the bottom, plus 4px slack under the button inside its 826px column
-const BOTTOM_OFFSET = 23;
-const WINDOW_HEIGHT = 726;
-const HEADER_HEIGHT = 76;
+// Full-height drawer docked to the right edge; the tab is its handle
+const TAB_WIDTH = 56;
+const DRAWER_WIDTH = 600;
 
 const MOTION = 'ease-[var(--ease-expo)] motion-reduce:transition-none';
-
-type WindowState = 'closed' | 'open' | 'minimized';
+const MESSAGE_ENTER = 'animate-[copilotMessageIn_400ms_var(--ease-expo)] motion-reduce:animate-none';
 
 /* ─── Header ────────────────────────────────────────────────────── */
 
-function ChatHeader({ onMinimize, onClose }: { onMinimize: () => void; onClose: () => void }) {
+function CopilotAvatar({ size }: { size: 'sm' | 'lg' }) {
+  const isLarge = size === 'lg';
   return (
-    <div className="flex h-[76px] w-full shrink-0 items-center justify-between border-b border-[#F7F6F1] px-4 py-[14px]">
-      <div className="flex items-center gap-[10px]">
-        <div className="relative size-[50px]">
-          <div className="flex size-[50px] items-center justify-center rounded-[16px] bg-[#D1E6E7]">
-            <Image src="/copilot/sparkles.svg" alt="" width={19} height={19} />
-          </div>
-          <Image src="/copilot/status-dot.svg" alt="" width={10} height={10} className="absolute bottom-0 right-0" />
-        </div>
-        <div className="flex flex-col gap-0.5 whitespace-nowrap leading-[normal]">
-          <p className="text-[28px] font-medium text-[#2C322F]">{COPILOT_NAME}</p>
-          <p className="text-sm text-[#62A4A7]">{COPILOT_STATUS}</p>
-        </div>
-      </div>
-      <div className="flex items-center gap-[7px]">
-        <button type="button" aria-label="縮小視窗" onClick={onMinimize} className="flex size-7 items-center justify-center rounded-md transition-colors hover:bg-black/5">
-          <Image src="/copilot/minus.svg" alt="" width={24} height={28} />
-        </button>
-        <button type="button" aria-label="關閉視窗" onClick={onClose} className="flex size-7 items-center justify-center rounded-md transition-colors hover:bg-black/5">
-          <Image src="/copilot/close.svg" alt="" width={30} height={30} className="max-w-none" />
-        </button>
-      </div>
+    <div
+      className={`flex shrink-0 items-center justify-center bg-[var(--mint)] ${isLarge ? 'size-12 rounded-2xl' : 'size-8 rounded-xl'}`}
+    >
+      <Image src="/copilot/sparkles.svg" alt="" width={isLarge ? 22 : 15} height={isLarge ? 22 : 15} />
     </div>
+  );
+}
+
+function ChatHeader() {
+  return (
+    <header className="flex shrink-0 items-center gap-3.5 border-b border-[#E5E2D9] bg-[var(--bg-sunlit)] px-7 pb-5 pt-8">
+      <CopilotAvatar size="lg" />
+      <div className="flex flex-col gap-1 leading-none">
+        <p className="text-[26px] font-semibold tracking-tight text-[var(--ink)]">{COPILOT_NAME}</p>
+        <p className="flex items-center gap-1.5 text-sm text-[var(--brand-ink)]">
+          <span className="relative flex size-2">
+            <span className="absolute inset-0 animate-ping rounded-full bg-[#12B76A] opacity-60 motion-reduce:animate-none" />
+            <span className="relative size-2 rounded-full bg-[#12B76A]" />
+          </span>
+          {COPILOT_STATUS}
+        </p>
+      </div>
+    </header>
   );
 }
 
 /* ─── Messages ──────────────────────────────────────────────────── */
 
-function ChatRow({ message }: { message: CopilotMessage }) {
-  const isUser = message.role === 'user';
-
+// "座標: 23.84, 120.51" is shown as a label/value pair; anything else as plain text
+function DetailItem({ detail }: { detail: string }) {
+  const [label, value] = detail.split(/:\s(.*)/);
   return (
-    <div className={`flex w-full flex-col gap-1 ${isUser ? 'items-end' : 'items-start'}`}>
-      <div
-        className={`flex flex-col gap-1.5 rounded-xl px-[14px] py-[10px] ${
-          isUser ? 'max-w-[329px] bg-[#62A4A7] text-white' : 'max-w-[400px] bg-[#D1E6E7] text-[#2C322F]'
-        }`}
-      >
-        <p className="text-base leading-[1.4]">{message.text}</p>
-        {message.details && (
-          <ul className="flex flex-col gap-1 text-[15px] leading-[normal] text-[#6F7468]">
-            {message.details.map((detail) => (
-              <li key={detail}>• {detail}</li>
-            ))}
-          </ul>
-        )}
+    <li className="flex gap-3 border-b border-[#E5E2D9] py-2 last:border-b-0">
+      {value ? (
+        <>
+          <span className="w-24 shrink-0 text-[var(--ink-soft)]">{label}</span>
+          <span className="font-medium text-[var(--ink)]">{value}</span>
+        </>
+      ) : (
+        <span className="text-[var(--brand-ink)]">{detail}</span>
+      )}
+    </li>
+  );
+}
+
+function AssistantMessage({ message }: { message: CopilotMessage }) {
+  return (
+    <div className={`flex gap-3 ${MESSAGE_ENTER}`}>
+      <CopilotAvatar size="sm" />
+      <div className="flex max-w-[440px] flex-col gap-1.5">
+        <p className="text-[13px] text-[var(--ink-soft)]">
+          {COPILOT_NAME} · {message.time}
+        </p>
+        <div className="flex flex-col gap-3 rounded-2xl rounded-tl-md border border-[#E5E2D9] bg-white px-4 py-3 shadow-[var(--shadow-card)]">
+          <p className="text-[15px] leading-[1.6] text-[var(--ink)]">{message.text}</p>
+          {message.details && (
+            <ul className="rounded-xl bg-[var(--surface-muted)] px-3.5 py-1 text-sm">
+              {message.details.map((detail) => (
+                <DetailItem key={detail} detail={detail} />
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
-      <p className="text-[13px] leading-[normal] text-[#6F7468]">{message.time}</p>
+    </div>
+  );
+}
+
+function UserMessage({ message }: { message: CopilotMessage }) {
+  return (
+    <div className={`flex flex-col items-end gap-1.5 ${MESSAGE_ENTER}`}>
+      <p className="max-w-[400px] rounded-2xl rounded-tr-md bg-[image:var(--gradient-primary)] px-4 py-3 text-[15px] leading-[1.6] text-white shadow-[var(--shadow-brand-glow)]">
+        {message.text}
+      </p>
+      <p className="text-[13px] text-[var(--ink-soft)]">{message.time}</p>
     </div>
   );
 }
 
 function TypingIndicator() {
   return (
-    <div role="status" aria-label={`${COPILOT_NAME} 正在輸入`} className="flex w-fit items-center gap-1.5 rounded-xl bg-[#D1E6E7] px-[14px] py-[14px]">
-      {[0, 150, 300].map((delay) => (
-        <span
-          key={delay}
-          className="size-2 animate-bounce rounded-full bg-[#62A4A7] motion-reduce:animate-none"
-          style={{ animationDelay: `${delay}ms` }}
-        />
-      ))}
+    <div className={`flex gap-3 ${MESSAGE_ENTER}`}>
+      <CopilotAvatar size="sm" />
+      <div
+        role="status"
+        aria-label={`${COPILOT_NAME} 正在輸入`}
+        className="flex items-center gap-1.5 rounded-2xl rounded-tl-md border border-[#E5E2D9] bg-white px-4 py-4 shadow-[var(--shadow-card)]"
+      >
+        {[0, 150, 300].map((delay) => (
+          <span
+            key={delay}
+            className="size-2 animate-bounce rounded-full bg-[var(--brand)] motion-reduce:animate-none"
+            style={{ animationDelay: `${delay}ms` }}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -93,22 +126,47 @@ function MessageThread({ messages, typing, active }: { messages: CopilotMessage[
   // Keep the latest message in view
   useEffect(() => {
     const thread = threadRef.current;
-    if (thread) thread.scrollTop = thread.scrollHeight;
+    if (thread) thread.scrollTo({ top: thread.scrollHeight, behavior: 'smooth' });
   }, [messages.length, typing, active]);
 
   return (
-    <div ref={threadRef} aria-live="polite" className="flex min-h-px flex-1 flex-col gap-4 overflow-y-auto bg-[#F7F6F1] p-4">
-      {messages.map((message) => (
-        <ChatRow key={message.id} message={message} />
-      ))}
+    <div
+      ref={threadRef}
+      aria-live="polite"
+      className="flex min-h-px flex-1 flex-col gap-6 overflow-y-auto bg-[image:var(--gradient-paper-strata)] px-7 py-6"
+    >
+      <p className="flex items-center gap-3 text-xs text-[var(--ink-soft)] before:h-px before:flex-1 before:bg-[#E5E2D9] after:h-px after:flex-1 after:bg-[#E5E2D9]">
+        今天
+      </p>
+      {messages.map((message) =>
+        message.role === 'user' ? <UserMessage key={message.id} message={message} /> : <AssistantMessage key={message.id} message={message} />,
+      )}
       {typing && <TypingIndicator />}
     </div>
   );
 }
 
-/* ─── Input ─────────────────────────────────────────────────────── */
+/* ─── Composer ──────────────────────────────────────────────────── */
 
-function InputBar({ onSend, disabled, inputRef }: { onSend: (text: string) => void; disabled: boolean; inputRef: React.RefObject<HTMLInputElement | null> }) {
+function Suggestions({ onPick, disabled }: { onPick: (text: string) => void; disabled: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {COPILOT_SUGGESTIONS.map((suggestion) => (
+        <button
+          key={suggestion}
+          type="button"
+          disabled={disabled}
+          onClick={() => onPick(suggestion)}
+          className={`rounded-full border border-[rgba(98,164,167,0.35)] bg-white px-3.5 py-1.5 text-sm text-[var(--brand-ink)] transition-[background-color,transform] duration-300 ${MOTION} hover:-translate-y-0.5 hover:bg-[var(--mint)] active:translate-y-0 disabled:pointer-events-none disabled:opacity-50`}
+        >
+          {suggestion}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function Composer({ onSend, disabled, inputRef }: { onSend: (text: string) => void; disabled: boolean; inputRef: React.RefObject<HTMLInputElement | null> }) {
   const [draft, setDraft] = useState('');
   const canSend = draft.trim().length > 0 && !disabled;
 
@@ -120,42 +178,89 @@ function InputBar({ onSend, disabled, inputRef }: { onSend: (text: string) => vo
   };
 
   return (
-    <form onSubmit={submit} className="flex shrink-0 items-center gap-[10px] border-t border-[#D9D6CE] p-3">
-      <label className="flex h-10 min-w-px flex-1 items-center gap-2 rounded-[20px] bg-[#F1EFE9] px-3 focus-within:shadow-[var(--shadow-focus)]">
-        <Image src="/copilot/paperclip.svg" alt="" width={18} height={18} />
+    <div className="flex shrink-0 flex-col gap-3 border-t border-[#E5E2D9] bg-[var(--bg-sunlit)] px-7 pb-7 pt-4">
+      <Suggestions onPick={onSend} disabled={disabled} />
+      <form
+        onSubmit={submit}
+        className="flex h-14 items-center gap-2 rounded-2xl border border-[#E5E2D9] bg-white pl-4 pr-2 shadow-[var(--shadow-card)] transition-shadow duration-300 focus-within:shadow-[var(--shadow-focus)]"
+      >
         <input
           ref={inputRef}
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="輸入訊息..."
+          placeholder={`問問 ${COPILOT_NAME}…`}
           aria-label={`傳訊息給 ${COPILOT_NAME}`}
-          className="min-w-px flex-1 bg-transparent text-base text-[#2C322F] placeholder-[#6F7468] outline-none"
+          className="min-w-px flex-1 bg-transparent text-base text-[var(--ink)] placeholder-[var(--ink-soft)] outline-none"
         />
-        <Image src="/copilot/smile.svg" alt="" width={18} height={18} />
-      </label>
-      <button
-        type="submit"
-        aria-label="送出訊息"
-        disabled={!canSend}
-        className="flex size-10 shrink-0 items-center justify-center rounded-[20px] bg-[#62A4A7] transition-all duration-300 hover:brightness-110 active:scale-95 disabled:opacity-50"
+        <button
+          type="submit"
+          aria-label="送出訊息"
+          disabled={!canSend}
+          className={`flex size-10 shrink-0 items-center justify-center rounded-xl bg-[image:var(--gradient-primary)] transition-[transform,opacity] duration-300 ${MOTION} hover:scale-105 active:scale-95 disabled:scale-100 disabled:opacity-40`}
+        >
+          <Image src="/copilot/arrow-right.svg" alt="" width={16} height={16} />
+        </button>
+      </form>
+    </div>
+  );
+}
+
+/* ─── Edge tab ──────────────────────────────────────────────────── */
+
+function EdgeTab({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={isOpen ? `收合 ${COPILOT_NAME} 助理` : `開啟 ${COPILOT_NAME} 助理`}
+      aria-expanded={isOpen}
+      aria-controls="copilot-window"
+      onClick={onToggle}
+      style={{ width: TAB_WIDTH }}
+      className={`group pointer-events-auto flex h-[176px] -mr-px shrink-0 flex-col items-center justify-center gap-3 rounded-l-[20px] bg-[#62A4A7] text-white shadow-[-4px_4px_16px_rgba(16,24,40,0.18)] outline-none transition-[transform,filter,box-shadow] duration-300 ${MOTION} hover:shadow-[-8px_6px_24px_rgba(16,24,40,0.28)] hover:brightness-110 focus-visible:shadow-[var(--shadow-focus)] ${
+        isOpen ? 'translate-x-0' : 'translate-x-3 hover:translate-x-0 focus-visible:translate-x-0'
+      }`}
+    >
+      <Image
+        src="/copilot/message-square.svg"
+        alt=""
+        width={22}
+        height={22}
+        className={`transition-transform duration-300 ${MOTION} group-hover:scale-110`}
+      />
+      <span className="text-base font-medium tracking-[0.2em] [text-orientation:upright] [writing-mode:vertical-rl]">AI助理</span>
+      <svg
+        aria-hidden
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        className={`transition-transform duration-500 ${MOTION} ${isOpen ? 'rotate-180' : 'group-hover:-translate-x-0.5'}`}
       >
-        <Image src="/copilot/arrow-right.svg" alt="" width={16} height={16} />
-      </button>
-    </form>
+        <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </button>
   );
 }
 
 /* ─── Widget ────────────────────────────────────────────────────── */
 
-// Floating AI copilot shown on every page once logged in
+// AI copilot drawer shown on every page once logged in; only its tab shows while closed
 export default function CopilotWidget({ hidden = false }: { hidden?: boolean }) {
-  const [windowState, setWindowState] = useState<WindowState>('closed');
+  const [isOpen, setIsOpen] = useState(false);
   const { messages, typing, send } = useCopilotChat();
   const scale = useFitScale(STAGE);
   const inputRef = useRef<HTMLInputElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
 
-  const isOpen = windowState === 'open';
-  const isClosed = windowState === 'closed';
+  // Clicking anywhere outside the drawer (tab included) retracts it
+  useEffect(() => {
+    if (!isOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!drawerRef.current?.contains(event.target as Node)) setIsOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -164,9 +269,9 @@ export default function CopilotWidget({ hidden = false }: { hidden?: boolean }) 
   }, [isOpen]);
 
   const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === 'Escape' && !isClosed) {
+    if (event.key === 'Escape' && isOpen) {
       event.stopPropagation();
-      setWindowState('closed');
+      setIsOpen(false);
     }
   };
 
@@ -174,37 +279,28 @@ export default function CopilotWidget({ hidden = false }: { hidden?: boolean }) 
     <div
       inert={hidden}
       onKeyDown={onKeyDown}
-      className={`fixed z-[55] transition-opacity duration-500 ${MOTION} ${hidden ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
-      style={{ right: RIGHT_OFFSET * scale, bottom: BOTTOM_OFFSET * scale }}
+      // Only the tab and the drawer take clicks: the wrapper spans the full height, even while the drawer is away
+      className={`pointer-events-none fixed right-0 top-0 z-[55] transition-opacity duration-500 ${MOTION} ${hidden ? 'opacity-0' : 'opacity-100'}`}
     >
-      <div className="flex w-[904px] flex-col items-end gap-4 font-sans" style={{ zoom: scale }}>
+      <div
+        ref={drawerRef}
+        className={`flex items-center font-sans transition-transform duration-700 ${MOTION}`}
+        style={{ zoom: scale, transform: isOpen ? 'none' : `translateX(${DRAWER_WIDTH}px)` }}
+      >
+        <EdgeTab isOpen={isOpen} onToggle={() => setIsOpen(!isOpen)} />
         <section
           id="copilot-window"
           aria-label={`${COPILOT_NAME} 聊天視窗`}
-          inert={isClosed}
-          className={`flex w-full origin-bottom-right flex-col overflow-clip border border-[#D9D6CE] bg-[#F7F6F1] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)] transition-[height,transform,opacity] duration-500 ${MOTION} ${
-            isClosed ? 'pointer-events-none translate-y-3 scale-95 opacity-0' : 'translate-y-0 scale-100 opacity-100'
+          inert={!isOpen}
+          className={`pointer-events-auto flex flex-col overflow-clip border-l-4 border-l-[#62A4A7] bg-[var(--bg-paper)] transition-shadow duration-700 ${MOTION} ${
+            isOpen ? 'shadow-[-12px_0_40px_rgba(44,50,47,0.25)]' : 'shadow-none'
           }`}
-          style={{ height: windowState === 'minimized' ? HEADER_HEIGHT + 2 : WINDOW_HEIGHT }}
-          onClick={() => windowState === 'minimized' && setWindowState('open')}
+          style={{ width: DRAWER_WIDTH, height: `calc(100dvh / ${scale})` }}
         >
-          <ChatHeader onMinimize={() => setWindowState('minimized')} onClose={() => setWindowState('closed')} />
-          <div inert={!isOpen} className="flex min-h-px flex-1 flex-col">
-            <MessageThread messages={messages} typing={typing} active={isOpen} />
-            <InputBar onSend={send} disabled={typing} inputRef={inputRef} />
-          </div>
+          <ChatHeader />
+          <MessageThread messages={messages} typing={typing} active={isOpen} />
+          <Composer onSend={send} disabled={typing} inputRef={inputRef} />
         </section>
-
-        <button
-          type="button"
-          aria-label={isOpen ? `收合 ${COPILOT_NAME} 助理` : `開啟 ${COPILOT_NAME} 助理`}
-          aria-expanded={isOpen}
-          aria-controls="copilot-window"
-          onClick={() => setWindowState(isOpen ? 'closed' : 'open')}
-          className={`flex size-20 items-center justify-center rounded-[28px] bg-[#62A4A7] drop-shadow-[0_4px_8px_rgba(16,24,40,0.1)] transition-all duration-300 ${MOTION} hover:-translate-y-1 hover:brightness-110 active:scale-95`}
-        >
-          <Image src="/copilot/message-square.svg" alt="" width={24} height={24} />
-        </button>
       </div>
     </div>
   );

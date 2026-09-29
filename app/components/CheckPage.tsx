@@ -3,18 +3,22 @@
 import { useState } from 'react';
 import Image from 'next/image';
 import TimelineCompare from './TimelineCompare';
+import BackToMapLink from './BackToMapLink';
+import ExportEntry from './ExportEntry';
+import SharedTransition, { PageBackgroundTransition, SHARED, TO_MAP, pagePart } from './SharedTransition';
 import { useFitScale, type FitStage } from './useFitScale';
+import { CONTENT_TOP, FRAME_MARGIN_X, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER } from './pageFrame';
 import { CAPTURES } from '../data/captures';
 import type { RecordItem } from '../data/mapRecords';
 
-// Content is laid out for the 1920×1080 Figma frame and scaled to the viewport; the height is that of the
-// square compare panel plus its film strip, with the navbar (120px) and some breathing room kept free
-const OVERLAY_STAGE: FitStage = { width: 1920, height: 890, marginX: 0, marginY: 180, minViewportWidth: 0 };
-const NAVBAR_HEIGHT = 120;
-const LEFT_MARGIN = 129;
-const RIGHT_MARGIN = 80;
-// Figma places the info column 149px below the navbar edge
-const INFO_TOP_OFFSET = 149;
+// What the check page shows of a well: imported map records and export-page wells both provide it
+export type CheckedWell = Pick<RecordItem, 'id' | 'coordinates' | 'timestamp'>;
+
+// The info column (560 wide: a 72px well id like SW-2023-A005 needs ~530) and the compare panel (film strip + square
+// image, 972 wide and 702 tall) with at least 60px between them, scaled to fit the content area lined up with the navbar
+const PANEL_HEIGHT = 702;
+const INFO_WIDTH = 560;
+const OVERLAY_STAGE: FitStage = { width: INFO_WIDTH + 60 + 972, height: PANEL_HEIGHT, marginX: FRAME_MARGIN_X, marginY: FRAME_MARGIN_Y, minViewportWidth: 0 };
 
 type Verdict = 'yes' | 'no';
 
@@ -27,11 +31,13 @@ const VERDICTS: { verdict: Verdict; label: string; color: string }[] = [
 
 function Background() {
   return (
-    <div className="absolute inset-0">
-      <Image src="/aerial-tile.png" alt="" fill priority sizes="100vw" className="object-cover" />
-      <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,3,3,0.4)_0%,rgba(35,35,35,0.28)_47%,rgba(255,255,255,0)_100%)]" />
-      <div className="absolute inset-0 opacity-40 [background:radial-gradient(ellipse_1707px_960px_at_50%_50%,rgba(99,83,54,0)_6%,rgba(150,126,82,0.5)_38%,rgb(201,169,110)_70%)]" />
-    </div>
+    <PageBackgroundTransition>
+      <div className="absolute inset-0">
+        <Image src="/aerial-tile.png" alt="" fill priority sizes="100vw" className="object-cover" />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,3,3,0.4)_0%,rgba(35,35,35,0.28)_47%,rgba(255,255,255,0)_100%)]" />
+        <div className="absolute inset-0 opacity-40 [background:radial-gradient(ellipse_1707px_960px_at_50%_50%,rgba(99,83,54,0)_6%,rgba(150,126,82,0.5)_38%,rgb(201,169,110)_70%)]" />
+      </div>
+    </PageBackgroundTransition>
   );
 }
 
@@ -61,16 +67,22 @@ function VerdictButton({ label, color, selected, dimmed, onClick }: { label: str
   );
 }
 
-function WellInfo({ record }: { record: RecordItem }) {
+function WellInfo({ record }: { record: CheckedWell }) {
   const [verdict, setVerdict] = useState<Verdict | null>(null);
   const chosen = VERDICTS.find((item) => item.verdict === verdict);
 
   return (
-    <div className="w-[700px]">
-      <h1 className="text-[96px] font-black leading-[normal] text-[#FBFBF8]">{record.id}</h1>
+    <div style={{ width: INFO_WIDTH }}>
+      <SharedTransition name={SHARED.wellId}>
+        <h1 className="whitespace-nowrap text-[72px] font-black leading-[normal] text-[#FBFBF8]">{record.id}</h1>
+      </SharedTransition>
       <div className="mt-[9px] flex flex-col gap-[35px] pl-[5px]">
-        <InfoRow icon="/check/icon-location.png" text={record.coordinates} />
-        <InfoRow icon="/check/icon-clock.png" text={record.timestamp.slice(0, 16)} />
+        <SharedTransition name={SHARED.wellCoordinates}>
+          <InfoRow icon="/check/icon-location.png" text={record.coordinates} />
+        </SharedTransition>
+        <SharedTransition name={SHARED.wellTime}>
+          <InfoRow icon="/check/icon-clock.png" text={record.timestamp.slice(0, 16)} />
+        </SharedTransition>
       </div>
       <div className="mt-[129px] flex gap-[50px] pl-px">
         {VERDICTS.map((item) => (
@@ -93,24 +105,30 @@ function WellInfo({ record }: { record: RecordItem }) {
 
 /* ─── Page ──────────────────────────────────────────────────────── */
 
-export default function CheckPage({ record }: { record: RecordItem }) {
+export default function CheckPage({ record, backHref }: { record: CheckedWell; backHref: string }) {
   const scale = useFitScale(OVERLAY_STAGE);
 
   return (
     <div className="relative h-screen overflow-hidden bg-[#2C322F]" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
       <Background />
 
-      <div
-        className="absolute inset-x-0 bottom-0 flex items-center justify-between"
-        style={{ top: NAVBAR_HEIGHT, paddingLeft: LEFT_MARGIN * scale, paddingRight: RIGHT_MARGIN * scale }}
-      >
-        <div className="self-start" style={{ marginTop: INFO_TOP_OFFSET * scale }}>
-          <div style={{ zoom: scale }}>
-            <WellInfo key={record.id} record={record} />
+      <BackToMapLink href={backHref} transitionTypes={TO_MAP} />
+
+      {/* lined up with the navbar left and right, centred in the height between the navbar and the window's bottom */}
+      <div className="absolute flex items-center" style={{ ...pagePart('check-content'), top: CONTENT_TOP, bottom: PAGE_GAP, left: PAGE_GUTTER, right: PAGE_GUTTER }}>
+        <div className="flex w-full items-stretch justify-between" style={{ height: PANEL_HEIGHT * scale }}>
+          {/* well info at the top of the column, the export shortcut level with the compare panel's bottom */}
+          <div className="flex flex-col justify-between">
+            <div style={{ zoom: scale }}>
+              <WellInfo key={record.id} record={record} />
+            </div>
+            <div className="self-start" style={{ zoom: scale }}>
+              <ExportEntry />
+            </div>
           </div>
-        </div>
-        <div style={{ zoom: scale }}>
-          <TimelineCompare captures={CAPTURES} />
+          <div style={{ zoom: scale }}>
+            <TimelineCompare captures={CAPTURES} />
+          </div>
         </div>
       </div>
     </div>

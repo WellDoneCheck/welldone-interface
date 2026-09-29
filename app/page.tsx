@@ -6,10 +6,19 @@ import FloatingGrid from './components/FloatingGrid';
 import { useSiteChrome } from './components/SiteChrome';
 import VideoShowcase from './components/VideoShowcase';
 import SiteFooter from './components/SiteFooter';
+import StartButton from './components/StartButton';
+import { useFitScale, type FitStage } from './components/useFitScale';
+
+// The hero's first screen is the 1920×1080 Figma frame, scaled to fit the window; the start button (371×108) sits
+// this far from its left and bottom edges
+const HERO_STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY: 0, minViewportWidth: 0 };
+const START_BUTTON_INSET = { left: 104, bottom: 144 };
 
 export default function Home() {
   const { heroAnimating, setHeroAnimating } = useSiteChrome();
   const videoSectionRef = useRef<HTMLElement>(null);
+  // the whole window, scrollbar included, as the hero covers it
+  const heroScale = useFitScale(HERO_STAGE, true);
 
   // Auto-align the video section to the viewport top when scrolling stops near it
   // Skip during hero animation to prevent fighting with auto-scroll
@@ -42,6 +51,16 @@ export default function Home() {
         scrollHeight={400}
         shrinkHeight={350}
         onAnimatingChange={setHeroAnimating}
+        heroAction={
+          <div
+            className="pointer-events-auto absolute"
+            style={{ left: START_BUTTON_INSET.left * heroScale, bottom: START_BUTTON_INSET.bottom * heroScale }}
+          >
+            <div style={{ zoom: heroScale }}>
+              <StartButton />
+            </div>
+          </div>
+        }
       />
 
       {/* ===== Content sections after the scroll ===== */}

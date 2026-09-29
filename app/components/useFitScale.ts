@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 
 // A Figma-sized area that should be scaled to fit the viewport
 export interface FitStage {
@@ -25,17 +25,19 @@ function computeScale(stage: FitStage, viewportWidth: number, viewportHeight: nu
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, fit));
 }
 
-// Scale that makes the Figma-sized stage fill the viewport (stage must be a module-level constant)
-export function useFitScale(stage: FitStage): number {
-  const [scale, setScale] = useState(1);
+export function subscribeToResize(onResize: () => void): () => void {
+  window.addEventListener('resize', onResize);
+  return () => window.removeEventListener('resize', onResize);
+}
 
-  useEffect(() => {
-    const update = () =>
-      setScale(computeScale(stage, document.documentElement.clientWidth, window.innerHeight));
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [stage]);
-
-  return scale;
+// Scale that makes the Figma-sized stage fill the viewport (stage must be a module-level constant).
+// Read from the window on the very first render of a client-side navigation, so the page never shows at the wrong
+// size first; the server (and hydration) use 1 and update right after.
+// withScrollbar measures the whole window, scrollbar included: a page that scrolls then scales like one that doesn't.
+export function useFitScale(stage: FitStage, withScrollbar = false): number {
+  return useSyncExternalStore(
+    subscribeToResize,
+    () => computeScale(stage, withScrollbar ? window.innerWidth : document.documentElement.clientWidth, window.innerHeight),
+    () => 1,
+  );
 }

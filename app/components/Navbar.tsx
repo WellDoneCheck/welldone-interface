@@ -12,15 +12,13 @@ interface NavbarProps {
   userInfo?: UserInfo | null;
 }
 
-const NAV_ITEMS = ['水井辨識', '地圖檢視', '匯入', '匯出', '歷史紀錄', '監控總覽', '帳號管理'];
+// Each item is named after the page it opens (the account lives in the login panel, the upload records on 影像匯入與紀錄)
+const NAV_ITEMS = ['首頁', '地圖檢視', '影像匯入與紀錄', '監控總覽'];
 const NAV_ROUTES: Record<string, string> = {
-  '水井辨識': '/',
+  '首頁': '/',
   '地圖檢視': '/map',
-  '匯入': '/upload',
-  '匯出': '/',
-  '歷史紀錄': '/',
+  '影像匯入與紀錄': '/upload',
   '監控總覽': '/monitor',
-  '帳號管理': '/',
 };
 
 export default function Navbar({
@@ -96,7 +94,7 @@ export default function Navbar({
 
   return (
     <nav
-      className={`fixed top-0 inset-x-0 z-50 px-8 md:px-20 transition-all duration-500 ${style.navBg} ${
+      className={`fixed top-0 inset-x-0 z-50 [view-transition-name:site-navbar] px-8 md:px-20 transition-all duration-500 ${style.navBg} ${
         heroAnimating ? 'opacity-0 -translate-y-full pointer-events-none' : 'opacity-100 translate-y-0'
       }`}
     >
@@ -115,7 +113,7 @@ export default function Navbar({
 
         {/* Desktop nav links — only when logged in */}
         {isLoggedIn && (
-          <div className="hidden md:flex items-center gap-12">
+          <div className="hidden md:flex items-center gap-6 xl:gap-12">
             {NAV_ITEMS.map((item) => (
               <a
                 key={item}
@@ -125,7 +123,7 @@ export default function Navbar({
                   const route = NAV_ROUTES[item];
                   if (route) router.push(route);
                 }}
-                className={`text-2xl font-semibold transition-all duration-500 ${style.linkColor} ${
+                className={`whitespace-nowrap text-lg font-semibold transition-all duration-500 xl:text-2xl ${style.linkColor} ${
                   contentFaded ? 'opacity-0 translate-y-[-8px]' : 'opacity-100 translate-y-0'
                 }`}
               >

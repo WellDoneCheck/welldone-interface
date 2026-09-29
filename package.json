@@ -3,12 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/dev.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "commit": "cz",
-    "test": "echo \"No tests yet\" && exit 0"
+    "test": "node --import ./tests/resolve-ts.mjs --test tests/*.test.mjs"
   },
   "dependencies": {
     "next": "16.2.2",
