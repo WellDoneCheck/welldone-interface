@@ -303,6 +303,20 @@ body {
   40% { transform: translateY(-4px); opacity: 1; }
 }
 
+/* 導覽列：「地圖檢視」「水井檢查」造訪過後才出現，出現時寬度與間距一起展開、文字淡入落下，其後項目順勢讓位 */
+@keyframes nav-item-in {
+  from {
+    max-width: 0;
+    margin-inline-start: calc(-1 * var(--nav-gap, 0px));
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  /* both items are four characters wide, so the width keeps growing for the whole animation */
+  to {
+    max-width: 4.2em;
+  }
+}
+
 /* AI 助理：新訊息淡入上移 */
 @keyframes copilotMessageIn {
   from { opacity: 0; transform: translateY(8px); }

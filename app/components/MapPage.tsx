@@ -9,6 +9,7 @@ import CompareEntry from './CompareEntry';
 import MapPhoto, { MapShade, MAP_IMAGE } from './MapPhoto';
 import SharedTransition, { PageBackgroundTransition, SHARED, TO_CHECK, pagePart } from './SharedTransition';
 import type { RecordItem } from '../data/mapRecords';
+import { rememberVisit } from '../utils/lastVisit';
 import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GUTTER, useViewportSize } from './pageFrame';
 
@@ -327,6 +328,8 @@ export default function MapPage({ records, record: initialRecord, openCardOnArri
 
   // before paint, so a page transition starting now already zooms in on this pin
   useLayoutEffect(() => setZoomFocus(record), [record]);
+  // the navbar's 地圖檢視 comes back to the record shown last
+  useEffect(() => rememberVisit('map', record.id), [record.id]);
 
   // Another pin selects that well and opens its card; the selected pin toggles the card. The address follows the
   // selection without reloading the page.

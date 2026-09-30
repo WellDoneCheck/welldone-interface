@@ -7,6 +7,7 @@ import { useSiteChrome } from './components/SiteChrome';
 import VideoShowcase from './components/VideoShowcase';
 import SiteFooter from './components/SiteFooter';
 import StartButton from './components/StartButton';
+import { PageTransition } from './components/SharedTransition';
 import { useFitScale, type FitStage } from './components/useFitScale';
 
 // The hero's first screen is the 1920×1080 Figma frame, scaled to fit the window; the start button (371×108) sits
@@ -43,38 +44,40 @@ export default function Home() {
   useEffect(() => () => setHeroAnimating(false), [setHeroAnimating]);
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* ===== Image-sequence scroll hero ===== */}
-      <ScrollImageSequence
-        totalFrames={229}
-        framePattern="/landing_page/map_frames/frame_{index}.jpg"
-        scrollHeight={400}
-        shrinkHeight={350}
-        onAnimatingChange={setHeroAnimating}
-        heroAction={
-          <div
-            className="pointer-events-auto absolute"
-            style={{ left: START_BUTTON_INSET.left * heroScale, bottom: START_BUTTON_INSET.bottom * heroScale }}
-          >
-            <div style={{ zoom: heroScale }}>
-              <StartButton />
+    <PageTransition>
+      <div className="min-h-screen bg-black text-white">
+        {/* ===== Image-sequence scroll hero ===== */}
+        <ScrollImageSequence
+          totalFrames={229}
+          framePattern="/landing_page/map_frames/frame_{index}.jpg"
+          scrollHeight={400}
+          shrinkHeight={350}
+          onAnimatingChange={setHeroAnimating}
+          heroAction={
+            <div
+              className="pointer-events-auto absolute"
+              style={{ left: START_BUTTON_INSET.left * heroScale, bottom: START_BUTTON_INSET.bottom * heroScale }}
+            >
+              <div style={{ zoom: heroScale }}>
+                <StartButton />
+              </div>
             </div>
-          </div>
-        }
-      />
+          }
+        />
 
-      {/* ===== Content sections after the scroll ===== */}
-      <section className="relative z-10 bg-black">
-        <FloatingGrid />
+        {/* ===== Content sections after the scroll ===== */}
+        <section className="relative z-10 bg-black">
+          <FloatingGrid />
 
-      </section>
+        </section>
 
-      {/* ===== Video section (below Kove) ===== */}
-      <section ref={videoSectionRef} className="relative z-10 flex min-h-[100vh] items-center justify-center bg-[#F7F6F1] px-8 pb-10 pt-28 md:px-20">
-        <VideoShowcase />
-      </section>
+        {/* ===== Video section (below Kove) ===== */}
+        <section ref={videoSectionRef} className="relative z-10 flex min-h-[100vh] items-center justify-center bg-[#F7F6F1] px-8 pb-10 pt-28 md:px-20">
+          <VideoShowcase />
+        </section>
 
-      <SiteFooter />
-    </div>
+        <SiteFooter />
+      </div>
+    </PageTransition>
   );
 }

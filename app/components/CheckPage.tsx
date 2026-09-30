@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import TimelineCompare from './TimelineCompare';
 import BackToMapLink from './BackToMapLink';
@@ -10,6 +10,7 @@ import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_X, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER } from './pageFrame';
 import { CAPTURES } from '../data/captures';
 import type { RecordItem } from '../data/mapRecords';
+import { rememberVisit } from '../utils/lastVisit';
 
 // What the check page shows of a well: imported map records and export-page wells both provide it
 export type CheckedWell = Pick<RecordItem, 'id' | 'coordinates' | 'timestamp'>;
@@ -107,6 +108,8 @@ function WellInfo({ record }: { record: CheckedWell }) {
 
 export default function CheckPage({ record, backHref }: { record: CheckedWell; backHref: string }) {
   const scale = useFitScale(OVERLAY_STAGE);
+  // the navbar's 水井檢查 comes back to the well checked last
+  useEffect(() => rememberVisit('check', record.id), [record.id]);
 
   return (
     <div className="relative h-screen overflow-hidden bg-[#2C322F]" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>

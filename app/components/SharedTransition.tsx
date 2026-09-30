@@ -39,6 +39,13 @@ export const ONLY_TO_UPLOAD = { 'to-upload': 'auto', default: 'none' } as const;
 export const OPEN_SHEET = ['export-sheet'];
 const NONE_FOR_SHEET = { 'export-sheet': 'none', default: 'auto' } as const;
 
+// Wraps a page with nothing of its own to animate (the home page), so leaving it or coming back to it still starts a view
+// transition that cross-fades the pages. Without it, going from the home page to one whose parts only appear (map, check)
+// started no transition at all. (Not around every page: the export sheet would then cross-fade the page under it.)
+export function PageTransition({ children }: { children: ReactNode }) {
+  return <ViewTransition default={NONE_FOR_SHEET}>{children}</ViewTransition>;
+}
+
 // The map and check page backgrounds: going to the check page the map zooms in on the well's pin while the close-up
 // takes over, and coming back the map zooms out from the pin (animations in globals.css); otherwise they cross-fade
 export function PageBackgroundTransition({ children }: { children: ReactNode }) {

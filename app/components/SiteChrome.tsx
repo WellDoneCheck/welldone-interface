@@ -1,9 +1,10 @@
 'use client';
 
-import { createContext, useContext, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import Navbar from './Navbar';
 import LoginPanel, { type UserInfo } from './LoginPanel';
 import CopilotWidget from './CopilotWidget';
+import { setVisitAccount } from '../utils/lastVisit';
 
 interface SiteChromeContextValue {
   heroAnimating: boolean;
@@ -35,6 +36,9 @@ export default function SiteChrome({ children }: { children: ReactNode }) {
   const [userInfo, setUserInfo] = useState<UserInfo | null>(null);
   // what to do once the user has logged in (set by requireLogin); stored as a function, so wrapped in an object
   const [afterLogin, setAfterLogin] = useState<{ run: () => void } | null>(null);
+
+  // the navbar's way back to the last map record / well is kept per account
+  useEffect(() => setVisitAccount(userInfo?.name ?? null), [userInfo]);
 
   const requireLogin = (then: () => void) => {
     if (userInfo) {
