@@ -1,4 +1,4 @@
-import CompareFromAddress from '../components/CompareFromAddress';
+import CompareFromAddress from '../../components/CompareFromAddress';
 
 export const metadata = {
   title: '合法水井比對 — SkyWell',

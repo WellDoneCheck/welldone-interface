@@ -124,14 +124,17 @@ export function pointFeatures<T extends { longitude: number; latitude: number }>
 // A layer of icons the map draws itself (e.g. pins and markers): on the graphics card they move and scale with the map
 // at no cost, where a hundred page elements would all be placed again on every frame of a zoom. Adds the icons, an
 // empty GeoJSON source and a symbol layer, both called `id`; true once they are on the map, for the page to fill the
-// source (setData) and style the layer. icons may take a while (e.g. an image to load first).
+// source (setData) and style the layer. icons may take a while (e.g. an image to load first). Taken off the map again
+// when the page using it goes (the map may stay, shared with the next page: see SurveyMap).
 export function useIconLayer(
   map: MapLibreMap | null,
   id: string,
   icons: () => Promise<Record<string, Icon>>,
   layout: SymbolLayerSpecification['layout'],
 ): boolean {
-  const [ready, setReady] = useState(false);
+  // the map the layer has been added to: ready only for that map, so a page given another (e.g. a new map started in
+  // place of the old) does not style a layer it does not have yet
+  const [readyOn, setReadyOn] = useState<MapLibreMap | null>(null);
   const iconsRef = useRef(icons);
   const layoutRef = useRef(layout);
   useEffect(() => {
@@ -144,13 +147,19 @@ export function useIconLayer(
       }
       map.addSource(id, { type: 'geojson', data: pointFeatures([], () => ({})) });
       map.addLayer({ id, type: 'symbol', source: id, layout: { 'icon-allow-overlap': true, 'icon-ignore-placement': true, ...layoutRef.current } });
-      setReady(true);
+      setReadyOn(map);
     });
     return () => {
       cancelled = true;
+      setReadyOn(null);
+      // (a removed map has no style left: getLayer finds nothing)
+      if (map.getLayer(id)) {
+        map.removeLayer(id);
+        map.removeSource(id);
+      }
     };
   }, [map, id]);
-  return ready;
+  return map !== null && readyOn === map;
 }
 
 // The icon (from an icon layer) at a point on screen, if any: the value of one of its properties
@@ -170,10 +179,9 @@ function Overlay({ map, children }: { map: MapLibreMap; children: (view: MapView
 }
 
 // The survey imagery from titiler over the electronic map, which fills in around the imaged strip (where the survey's
-// tiles are transparent). Muted: darker and greyer, drawn so by the map itself (a CSS filter on the canvas would be
-// applied on every frame).
-function mapStyle(muted: boolean): StyleSpecification {
-  const paint = { 'raster-fade-duration': 200, ...(muted && { 'raster-saturation': -0.3, 'raster-brightness-max': 0.6 }) };
+// tiles are transparent).
+function mapStyle(): StyleSpecification {
+  const paint = { 'raster-fade-duration': 200 };
   return {
     version: 8,
     sources: {
@@ -191,8 +199,6 @@ const MAPLIBRE_WORKER_URL = '/maplibre-worker/maplibre-gl-worker.mjs';
 
 // The container's colour, seen through the map where no tile covers it (yet): the electronic map's own pale grey ground
 const MAP_BACKGROUND: [number, number, number] = [0xf7, 0xf7, 0xf7];
-// While the map moves, what is behind the logo is looked at no more often than this
-const LOGO_SAMPLE_MS = 200;
 
 // The map's pixels behind the navbar logo's word (Navbar's data-nav-logo-word), or null when the map is not what lies
 // behind it (another page part covers it there, or the word is elsewhere)
@@ -221,28 +227,30 @@ function pixelsBehindLogo(map: MapLibreMap, container: HTMLElement): Uint8Array 
   return pixels;
 }
 
-// Tells the navbar whether the map behind its logo is light (utils/logoBackdrop). The canvas can only be read right
-// after it is drawn: on draws while moving (now and then), and on one more draw asked for once the map is still.
-function useLogoBackdrop(map: MapLibreMap | null, containerRef: RefObject<HTMLDivElement | null>) {
+// Calls onDrawnAtRest right after the map is drawn, once it has come to rest: the canvas can only be read right after a
+// draw, so one more draw is asked for when the map is still. Not while it moves: reading the canvas makes the page wait
+// for the graphics card, a hitch on every read.
+function useDrawnAtRest(map: MapLibreMap | null, onDrawnAtRest: (() => void) | null) {
+  const callback = useRef(onDrawnAtRest);
   useEffect(() => {
-    const container = containerRef.current;
-    if (!map || !container) return;
-    const source = {};
-    let lastSample = 0;
-    let wanted = false;
-    let lastDrawSampled = false;
+    callback.current = onDrawnAtRest;
+  });
+  const wanted = onDrawnAtRest !== null;
+  useEffect(() => {
+    if (!map || !wanted) return;
+    // asked: the next draw is the one asked for at rest; read: the last draw was it (so the idle that follows it asks
+    // for no other)
+    let asked = false;
+    let read = false;
     const onRender = () => {
-      const now = performance.now();
-      lastDrawSampled = wanted || now - lastSample >= LOGO_SAMPLE_MS;
-      if (!lastDrawSampled) return;
-      wanted = false;
-      lastSample = now;
-      const pixels = pixelsBehindLogo(map, container);
-      reportLogoBackdrop(source, pixels && isLightBackdrop(pixels, MAP_BACKGROUND));
+      read = asked;
+      if (!asked) return;
+      asked = false;
+      callback.current?.();
     };
     const onIdle = () => {
-      if (lastDrawSampled) return;
-      wanted = true;
+      if (read) return;
+      asked = true;
       map.triggerRepaint();
     };
     map.on('render', onRender);
@@ -250,9 +258,19 @@ function useLogoBackdrop(map: MapLibreMap | null, containerRef: RefObject<HTMLDi
     return () => {
       map.off('render', onRender);
       map.off('idle', onIdle);
-      reportLogoBackdrop(source, null);
     };
-  }, [map, containerRef]);
+  }, [map, wanted]);
+}
+
+// Tells the navbar whether the map behind its logo is light (utils/logoBackdrop), each time the map comes to rest
+function useLogoBackdrop(map: MapLibreMap | null, containerRef: RefObject<HTMLDivElement | null>) {
+  const [source] = useState(() => ({}));
+  useDrawnAtRest(map, () => {
+    const container = containerRef.current;
+    const pixels = map && container && pixelsBehindLogo(map, container);
+    reportLogoBackdrop(source, pixels ? isLightBackdrop(pixels, MAP_BACKGROUND) : null);
+  });
+  useEffect(() => () => reportLogoBackdrop(source, null), [source]);
 }
 
 // Panning stops a strip's width (and height) past the survey on every side: room for the pages that keep the strip
@@ -281,8 +299,6 @@ interface TileMapProps {
   camera?: MapCamera;
   // dragging, scrolling and pinching move the map (off for a backdrop)
   interactive?: boolean;
-  // darker and greyer imagery, e.g. behind light markers
-  muted?: boolean;
   // a click on the map itself (not a drag, nor a click on something drawn over it); event.point is where, on screen
   onMapClick?: (event: MapMouseEvent) => void;
   className?: string;
@@ -291,12 +307,32 @@ interface TileMapProps {
   children?: (view: MapView) => ReactNode;
   // the map once it has started, for a page drawing over it from elsewhere (with useMapProject)
   onReady?: (map: MapLibreMap) => void;
+  // a picture of the map (with what it draws itself, e.g. pins) each time it comes to rest
+  onRestImage?: (image: Blob) => void;
+  // shown where the map will be until it has drawn itself (e.g. a picture of it from before), and how long to wait
+  // before starting it: a page arriving with a transition keeps the work of starting the map out of its frames
+  placeholder?: string;
+  startAfter?: number;
 }
 
 // A real map of the survey: tiles from titiler (see utils/tileServer), with whatever the page draws over it
-export default function TileMap({ fit, camera, interactive = false, muted = false, onMapClick, className = '', children, onReady }: TileMapProps) {
+export default function TileMap({
+  fit,
+  camera,
+  interactive = false,
+  onMapClick,
+  className = '',
+  children,
+  onReady,
+  onRestImage,
+  placeholder,
+  startAfter = 0,
+}: TileMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [map, setMap] = useState<MapLibreMap | null>(null);
+  // the placeholder stays until the map has drawn itself once with its tiles
+  const [drawn, setDrawn] = useState(false);
+  const firstStartAfter = useRef(startAfter);
   const firstFit = useRef(fit);
   const firstCamera = useRef(camera);
   const onMapClickRef = useRef(onMapClick);
@@ -308,36 +344,45 @@ export default function TileMap({ fit, camera, interactive = false, muted = fals
   useEffect(() => {
     let created: MapLibreMap | null = null;
     let cancelled = false;
-    import('maplibre-gl').then(({ Map, setWorkerUrl }) => {
-      if (cancelled || !containerRef.current) return;
-      // its worker is served by app/maplibre-worker (the bundler leaves it out)
-      setWorkerUrl(MAPLIBRE_WORKER_URL);
-      const { bounds, padding } = firstFit.current;
-      const start = firstCamera.current;
-      created = new Map({
-        container: containerRef.current,
-        style: mapStyle(muted),
-        ...(start ? { center: start.center, zoom: start.zoom } : { bounds, fitBoundsOptions: { padding } }),
-        interactive,
-        maxBounds: PAN_LIMIT,
-        maxZoom: 22.5,
-        attributionControl: false,
-        renderWorldCopies: false,
+    // started at once, or after startAfter
+    const startMap = () => {
+      import('maplibre-gl').then(({ Map, setWorkerUrl }) => {
+        if (cancelled || !containerRef.current) return;
+        // its worker is served by app/maplibre-worker (the bundler leaves it out)
+        setWorkerUrl(MAPLIBRE_WORKER_URL);
+        const { bounds, padding } = firstFit.current;
+        const start = firstCamera.current;
+        created = new Map({
+          container: containerRef.current,
+          style: mapStyle(),
+          ...(start ? { center: start.center, zoom: start.zoom } : { bounds, fitBoundsOptions: { padding } }),
+          interactive,
+          maxBounds: PAN_LIMIT,
+          maxZoom: 22.5,
+          attributionControl: false,
+          renderWorldCopies: false,
+        });
+        // a start placed off the middle (e.g. a well beside a card): moved there at once, before anything is drawn
+        if (start?.offset) created.easeTo({ center: start.center, zoom: start.zoom, offset: start.offset, duration: 0 });
+        created.on('click', (event) => onMapClickRef.current?.(event));
+        // handed over once its style has loaded, so a page can add its own images, sources and layers to it at once
+        const loaded = created;
+        loaded.once('style.load', () => {
+          if (!cancelled) setMap(loaded);
+        });
+        loaded.once('idle', () => {
+          if (!cancelled) setDrawn(true);
+        });
       });
-      // a start placed off the middle (e.g. a well beside a card): moved there at once, before anything is drawn
-      if (start?.offset) created.easeTo({ center: start.center, zoom: start.zoom, offset: start.offset, duration: 0 });
-      created.on('click', (event) => onMapClickRef.current?.(event));
-      // handed over once its style has loaded, so a page can add its own images, sources and layers to it at once
-      const loaded = created;
-      loaded.once('style.load', () => {
-        if (!cancelled) setMap(loaded);
-      });
-    });
+    };
+    const timer = firstStartAfter.current > 0 ? setTimeout(startMap, firstStartAfter.current) : null;
+    if (!timer) startMap();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
       created?.remove();
     };
-  }, [interactive, muted]);
+  }, [interactive]);
 
   // The container may still be growing to its size when the map starts (the page is laid out, scaled, revealed…):
   // until someone drags or zooms, keep the fitted area in view whatever size the map ends up (not when it started
@@ -365,10 +410,12 @@ export default function TileMap({ fit, camera, interactive = false, muted = fals
     };
   }, [map]);
 
-  // a new area to show: move there
+  // a new area to show (e.g. another page sharing the map fits it to its own): move there from wherever the map is
   const fitKey = JSON.stringify(fit);
+  const shownFitKey = useRef(JSON.stringify(firstFit.current));
   useEffect(() => {
-    if (!map || fitKey === JSON.stringify(firstFit.current)) return;
+    if (!map || fitKey === shownFitKey.current) return;
+    shownFitKey.current = fitKey;
     const { bounds, padding } = JSON.parse(fitKey) as TileMapProps['fit'];
     map.fitBounds(bounds, { padding, duration: 700 });
   }, [map, fitKey]);
@@ -378,12 +425,22 @@ export default function TileMap({ fit, camera, interactive = false, muted = fals
   }, [map, onReady]);
 
   useLogoBackdrop(map, containerRef);
+  useDrawnAtRest(
+    map,
+    onRestImage
+      ? () => map?.getCanvas().toBlob((image) => image && onRestImage(image), 'image/webp', 0.85)
+      : null,
+  );
 
   return (
     // isolate: what is drawn over the map (e.g. a raised pin) stays under the page's cards and panels
     <div className={`absolute inset-0 isolate overflow-hidden ${className}`} style={{ backgroundColor: `rgb(${MAP_BACKGROUND.join(' ')})` }}>
       {/* MapLibre makes its container position: relative, so it fills this box by size rather than by inset */}
       <div ref={containerRef} className="h-full w-full" />
+      {placeholder && !drawn && (
+        // eslint-disable-next-line @next/next/no-img-element -- a picture made in this browser (an object URL), not a file to optimise
+        <img src={placeholder} alt="" className="pointer-events-none absolute inset-0 h-full w-full" />
+      )}
       {children && map && <Overlay map={map}>{children}</Overlay>}
       {/* the electronic map's source, as its open data licence asks */}
       <p className="pointer-events-none absolute bottom-1.5 right-2 z-10 rounded-sm bg-white/70 px-1.5 text-[11px] leading-5 text-black/70">

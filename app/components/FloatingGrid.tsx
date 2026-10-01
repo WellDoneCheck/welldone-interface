@@ -16,10 +16,13 @@ export default function FloatingGrid() {
     ease: 0.08,
   });
 
+  // The columns ease after the scroll position: a frame loop that runs while they are still catching up, started again by
+  // scrolling (and resizing), not one left running on every frame of the page
   useEffect(() => {
-    let requestID: number;
+    let requestID: number | null = null;
 
     const update = () => {
+      requestID = null;
       const section = sectionRef.current;
       if (!section) return;
 
@@ -31,9 +34,9 @@ export default function FloatingGrid() {
         scrollData.current.target = 0;
       }
 
-      // Lerp
-      scrollData.current.current += 
-        (scrollData.current.target - scrollData.current.current) * scrollData.current.ease;
+      // Lerp, until it is within a tenth of a pixel of the target
+      const gap = scrollData.current.target - scrollData.current.current;
+      scrollData.current.current = Math.abs(gap) < 0.1 ? scrollData.current.target : scrollData.current.current + gap * scrollData.current.ease;
 
       const delta = scrollData.current.current;
 
@@ -44,11 +47,21 @@ export default function FloatingGrid() {
         rightColRef.current.style.transform = `translate3d(0, -${delta * 0.8}px, 0)`;
       }
 
-      requestID = requestAnimationFrame(update);
+      if (delta !== scrollData.current.target) requestID = requestAnimationFrame(update);
     };
 
-    requestID = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(requestID);
+    const wake = () => {
+      if (requestID === null) requestID = requestAnimationFrame(update);
+    };
+
+    wake();
+    window.addEventListener('scroll', wake, { passive: true });
+    window.addEventListener('resize', wake);
+    return () => {
+      if (requestID !== null) cancelAnimationFrame(requestID);
+      window.removeEventListener('scroll', wake);
+      window.removeEventListener('resize', wake);
+    };
   }, []);
 
   const IMAGES = [

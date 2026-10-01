@@ -23,10 +23,12 @@ const ROLE_LABEL: Record<Role, string> = { compare: '比較', current: '目前' 
 const ROLE_COLOR: Record<Role, string> = { compare: 'bg-[#62A4A7]', current: 'bg-[#3F7A7E]' };
 
 // Fake difference between captures until real imagery is connected: the older the capture, the more it looks like an
-// old photo (yellowed, faded, darker), so the two sides of the divider are easy to tell apart
-function captureFilter(index: number, total: number): string {
+// old photo (a warmer, darker wash over it), so the two sides of the divider are easy to tell apart. A plain
+// see-through colour on top, not a CSS filter: a filter is worked out again whenever the image is painted, which a
+// page transition does on every frame for all fourteen images here.
+function captureTint(index: number, total: number): string {
   const age = 1 - index / Math.max(total - 1, 1);
-  return `sepia(${(age * 0.6).toFixed(2)}) saturate(${(1 - age * 0.45).toFixed(2)}) brightness(${(1 - age * 0.22).toFixed(2)}) contrast(${(1 - age * 0.12).toFixed(2)})`;
+  return `rgba(112, 80, 36, ${(age * 0.42).toFixed(2)})`;
 }
 
 const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
@@ -41,10 +43,11 @@ interface CompareViewProps {
 // Square view of a capture's imagery (the tile's content square scaled up to fill the frame)
 function CaptureImage({ index, total, size }: { index: number; total: number; size: number }) {
   return (
-    <div className="absolute inset-0 overflow-hidden" style={{ filter: captureFilter(index, total) }}>
+    <div className="absolute inset-0 overflow-hidden">
       <div className="absolute left-0 top-0" style={{ width: TILE_CONTENT_SIZE, height: TILE_CONTENT_SIZE }}>
         <Image src="/aerial-tile.webp" unoptimized alt="" fill sizes={`${Math.round(size * 1.35)}px`} className="object-cover" draggable={false} />
       </div>
+      <div className="absolute inset-0" style={{ background: captureTint(index, total) }} />
     </div>
   );
 }

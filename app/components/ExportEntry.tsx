@@ -1,6 +1,5 @@
 'use client';
 
-import Image from 'next/image';
 import Link from 'next/link';
 import { EXPORT_WELLS } from '../data/exportWells';
 import SharedTransition, { OPEN_SHEET, SHARED } from './SharedTransition';
@@ -31,15 +30,21 @@ export default function ExportEntry() {
       >
         {/* only the contents lift on hover; the link itself stays put so its clickable area never slips from under the pointer */}
         <div className="flex h-[84px] items-stretch shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] transition-transform duration-500 ease-[var(--ease-expo)] group-hover:-translate-y-1">
-          <div className="flex items-center gap-[20px] bg-[rgba(247,246,241,0.88)] px-[24px] backdrop-blur-md">
+          <div className="flex items-center gap-[20px] bg-[rgba(247,246,241,0.95)] px-[24px]">
             <WellCount count={verified} label="已驗證" color="text-[#62A4A7]" />
             <span className="h-[42px] w-px bg-[#2C322F]/15" />
             <WellCount count={pending} label="未驗證" color="text-[#8A611C]" />
         </div>
         <div className="flex items-center gap-[10px] bg-[#62A4A7] pl-[20px] pr-[24px] text-[22px] font-bold text-[#FBFBF8] transition-colors duration-300 group-hover:bg-[#54999D]">
-          <Image src="/export/icon-export-csv.png" alt="" width={30} height={30} className="invert" />
+          {/* the wells' photos (a framed picture), not a file type: it opens the photos to check and export */}
+          <svg aria-hidden width="28" height="28" viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round">
+            <rect x="3" y="5" width="22" height="18" rx="2" />
+            <circle cx="10" cy="11" r="2.2" />
+            <path d="M3.5 21l7-7 5 5 3.5-3.5 5.5 5.5" strokeLinecap="round" />
+          </svg>
           資料匯出
-          <span className="transition-transform duration-500 ease-[var(--ease-expo)] group-hover:translate-x-1.5">→</span>
+          {/* up: it pulls the export sheet up over the page */}
+          <span className="transition-transform duration-500 ease-[var(--ease-expo)] group-hover:-translate-y-1">↑</span>
         </div>
         </div>
       </Link>

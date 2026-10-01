@@ -92,8 +92,10 @@ function RenderResult({ visible }: { visible: boolean }) {
 /* ─── Panel ─────────────────────────────────────────────────────── */
 
 // The whole area is the trigger — a render placeholder, not a button.
-// Click to generate; fake data for now.
-export default function ModelRender() {
+// Click to generate; fake data for now. Its endless animations (the floating cube, the scan line) are paused unless
+// it is `playing` (seen, on an open card): the card keeps both faces, and an SVG animation is painted again on every
+// frame even behind the other face, while the map behind is moving too.
+export default function ModelRender({ playing = true }: { playing?: boolean }) {
   const { status, progress, start } = useFakeRender(RENDER_DURATION_MS);
   const percent = Math.round(progress * 100);
   const copy = COPY[status];
@@ -113,7 +115,9 @@ export default function ModelRender() {
       aria-label={status === 'rendering' ? `立體模型生成中 ${percent}%` : status === 'done' ? '重新生成立體模型' : '生成立體模型'}
       onClick={start}
       onKeyDown={onKeyDown}
-      className="group relative left-1 top-1.5 h-[640px] w-[640px] cursor-pointer select-none overflow-hidden bg-[#EFEDE6] outline-none focus-visible:shadow-[inset_0_0_0_3px_#62A4A7]"
+      className={`group relative left-1 top-1.5 h-[640px] w-[640px] cursor-pointer select-none overflow-hidden bg-[#EFEDE6] outline-none focus-visible:shadow-[inset_0_0_0_3px_#62A4A7] ${
+        playing ? '' : '[&_*]:[animation-play-state:paused]'
+      }`}
     >
       {/* faint floor grid */}
       <div className="absolute inset-0 bg-[linear-gradient(rgba(98,164,167,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(98,164,167,0.12)_1px,transparent_1px)] bg-[size:40px_40px]" />

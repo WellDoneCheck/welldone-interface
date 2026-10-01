@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { countVerdicts, getWellVerdicts, setWellVerdict, subscribeToWellVerdicts, verdictOf } from '../app/utils/wellVerdicts.ts';
+import { countVerdicts, getWellVerdicts, lookOf, setWellVerdict, subscribeToWellVerdicts, VERDICT_COLOR, verdictOf, verdictOfWell } from '../app/utils/wellVerdicts.ts';
 import { EXPORT_WELLS } from '../app/data/exportWells.ts';
 
 // A stand-in for the browser's localStorage and window
@@ -34,9 +34,9 @@ test('a verdict can be changed, also over the one a well came with', () => {
 
 test('the counts follow the verdicts given', () => {
   const before = countVerdicts(EXPORT_WELLS, {});
-  assert.deepEqual(before, { verified: 100, pending: 5 });
+  assert.deepEqual(before, { verified: 45, pending: 5 });
   const after = countVerdicts(EXPORT_WELLS, { [pending[1].id]: 'well', [pending[2].id]: 'not-well' });
-  assert.deepEqual(after, { verified: 102, pending: 3 });
+  assert.deepEqual(after, { verified: 47, pending: 3 });
 });
 
 test('listeners hear of every verdict, and the verdicts are a new object each time', () => {
@@ -47,4 +47,18 @@ test('listeners hear of every verdict, and the verdicts are a new object each ti
   assert.equal(heard, 1);
   assert.notEqual(getWellVerdicts(), before);
   unsubscribe();
+});
+
+test('a well on the map has its export page verdict until verified here', () => {
+  const verified = EXPORT_WELLS.find((well) => well.verdict === 'not-well');
+  assert.equal(verdictOfWell(verified.id, {}), 'not-well');
+  assert.equal(verdictOfWell('SW-2023-B001', {}), null, 'a well only on the map starts unverified');
+  assert.equal(verdictOfWell('SW-2023-B001', { 'SW-2023-B001': 'well' }), 'well');
+  assert.equal(verdictOfWell(verified.id, { [verified.id]: 'well' }), 'well');
+});
+
+test('each verdict has its own look: red until verified, teal a well, grey not one', () => {
+  assert.equal(lookOf(null), 'pending');
+  assert.equal(lookOf('well'), 'well');
+  assert.equal(new Set(Object.values(VERDICT_COLOR)).size, 3);
 });

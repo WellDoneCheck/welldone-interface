@@ -5,11 +5,12 @@ import Link from 'next/link';
 import type { Map as MapLibreMap } from 'maplibre-gl';
 import TileMap, { useMapProject, type Bounds } from './TileMap';
 import { STATUS_META, type WellMarker, type WellStatus } from '../data/monitor';
+import { useSiteChrome } from './SiteChrome';
 import { IMAGERY_BOUNDS } from '../data/xizhouImagery';
 
-// the dark control panels over the map, as on the rest of the monitor page (no backdrop blur: over a map being dragged
+// the light control panels over the map, as on the rest of the monitor page (no backdrop blur: over a map being dragged
 // it would be worked out again on every frame)
-const OVERLAY = 'border border-white/[0.1] bg-[#141917]/[0.94]';
+const OVERLAY = 'border border-[#2C322F]/10 bg-[#F7F6F1]/[0.94] shadow-[0_4px_16px_rgba(0,0,0,0.18)]';
 
 // The whole strip, clear of the filter tabs above and the selected well's panel below (in the panel's own pixels)
 const PANEL_FIT = { bounds: IMAGERY_BOUNDS as Bounds, padding: { top: 70, bottom: 190, left: 24, right: 64 } };
@@ -83,12 +84,12 @@ function StatusFilter({ totals, filter, onChange }: StatusFilterProps) {
             aria-pressed={active}
             onClick={() => onChange(tab.key)}
             className={`flex items-center gap-1.5 px-3 py-2 text-sm transition-colors duration-300 ${
-              active ? 'bg-[#62A4A7]/25 font-bold text-[#F2F1EC]' : 'text-[#F2F1EC]/75 hover:bg-white/10 hover:text-[#F2F1EC]'
+              active ? 'bg-[#62A4A7]/20 font-bold text-[#2C322F]' : 'text-[#2C322F]/75 hover:bg-[#2C322F]/[0.06] hover:text-[#2C322F]'
             }`}
           >
             {tab.key && <span className={`h-2 w-2 ${STATUS_META[tab.key].dot}`} style={{ transform: 'rotate(45deg)' }} />}
             {tab.label}
-            <span className="text-xs tabular-nums text-[#F2F1EC]/50">{tab.count.toLocaleString()}</span>
+            <span className="text-xs tabular-nums text-[#2C322F]/50">{tab.count.toLocaleString()}</span>
           </button>
         );
       })}
@@ -104,10 +105,10 @@ function SelectedWell({ marker }: { marker: WellMarker }) {
   return (
     <div className={`absolute inset-x-4 bottom-4 z-20 flex items-end justify-between gap-4 p-4 ${OVERLAY}`}>
       <div className="min-w-0">
-        <p className="text-xs font-bold tracking-[0.05em] text-[#F2F1EC]/50">已選水井</p>
-        <p className="mt-1 text-2xl font-semibold text-[#F2F1EC]">{marker.recordId}</p>
-        <div className="mt-2 flex items-center gap-3 text-sm text-[#F2F1EC]/60">
-          <span className="inline-flex items-center gap-1.5 text-[#F2F1EC]">
+        <p className="text-xs font-bold tracking-[0.05em] text-[#2C322F]/50">已選水井</p>
+        <p className="mt-1 text-2xl font-semibold text-[#2C322F]">{marker.recordId}</p>
+        <div className="mt-2 flex items-center gap-3 text-sm text-[#2C322F]/60">
+          <span className="inline-flex items-center gap-1.5 text-[#2C322F]">
             <span className={`h-2 w-2 ${meta.dot}`} style={{ transform: 'rotate(45deg)' }} />
             {meta.label}
           </span>
@@ -115,8 +116,8 @@ function SelectedWell({ marker }: { marker: WellMarker }) {
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
-        <p className="text-4xl font-semibold leading-none text-[#F2F1EC]">{marker.confidence}%</p>
-        <p className="text-xs text-[#F2F1EC]/50">辨識信賴度</p>
+        <p className="text-4xl font-semibold leading-none text-[#2C322F]">{marker.confidence}%</p>
+        <p className="text-xs text-[#2C322F]/50">辨識信賴度</p>
         <Link
           href={`/check?record=${marker.recordId}`}
           className="mt-1 bg-[#62A4A7] px-4 py-2 text-sm font-bold text-white transition-colors duration-300 hover:bg-[#54999D]"
@@ -124,6 +125,25 @@ function SelectedWell({ marker }: { marker: WellMarker }) {
           前往驗證 →
         </Link>
       </div>
+    </div>
+  );
+}
+
+// In place of the selected well's details before logging in: the wells' details and verification are for logged-in users
+function LockedWell({ onLogin }: { onLogin: () => void }) {
+  return (
+    <div className={`absolute inset-x-4 bottom-4 z-20 flex items-center justify-between gap-4 p-4 ${OVERLAY}`}>
+      <div className="min-w-0">
+        <p className="text-xs font-bold tracking-[0.05em] text-[#2C322F]/50">水井詳情</p>
+        <p className="mt-1 text-sm text-[#2C322F]/75">登入後可點選地圖上的水井，查看詳情並前往驗證</p>
+      </div>
+      <button
+        type="button"
+        onClick={onLogin}
+        className="shrink-0 bg-[#62A4A7] px-4 py-2 text-sm font-bold text-white transition-colors duration-300 hover:bg-[#54999D]"
+      >
+        登入
+      </button>
     </div>
   );
 }
@@ -137,7 +157,7 @@ function ControlButton({ label, disabled, onClick, children }: { label: string; 
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-10 w-10 items-center justify-center text-[#F2F1EC] transition-colors duration-300 hover:bg-white/10 active:scale-95 disabled:opacity-40 ${OVERLAY}`}
+      className={`flex h-10 w-10 items-center justify-center text-[#2C322F] transition-colors duration-300 hover:bg-[#2C322F]/[0.06] active:scale-95 disabled:opacity-40 ${OVERLAY}`}
     >
       {children}
     </button>
@@ -164,26 +184,28 @@ function ZoomControls({ map, fit }: { map: MapLibreMap | null; fit: { bounds: Bo
   );
 }
 
-// The survey map (tiles from titiler), dragged and zoomed inside the panel, with a marker on every well
+// The survey map (tiles from titiler), dragged and zoomed inside the panel, with a marker on every well. Anyone sees the
+// markers; picking one (its details, the way to verify it) asks to log in first, then picks it.
 export default function MonitorMap({ markers, totals, filter, onFilterChange, selectedId, onSelect, scale }: MonitorMapProps) {
   const [map, setMap] = useState<MapLibreMap | null>(null);
-  const selected = markers.find((marker) => marker.recordId === selectedId) ?? markers[0];
+  const { isLoggedIn, requireLogin } = useSiteChrome();
+  const selected = isLoggedIn ? (markers.find((marker) => marker.recordId === selectedId) ?? markers[0]) : null;
   const shown = markers.filter((marker) => filter === null || marker.status === filter);
   const { top, bottom, left, right } = PANEL_FIT.padding;
   const fit = { bounds: PANEL_FIT.bounds, padding: { top: top * scale, bottom: bottom * scale, left: left * scale, right: right * scale } };
 
   return (
-    <section aria-label="水井地圖" className="relative h-full w-[628px] shrink-0 overflow-hidden border border-white/[0.08] bg-[#141917]">
+    <section aria-label="水井地圖" className="relative h-full w-[628px] shrink-0 overflow-hidden border border-[#2C322F]/10 bg-[#F7F6F1] shadow-[8px_8px_40px_0_rgba(0,0,0,0.25)]">
       <div className="absolute inset-0" style={{ zoom: 1 / scale }}>
-        <TileMap fit={fit} interactive muted onReady={setMap}>
+        <TileMap fit={fit} interactive onReady={setMap}>
           {({ project }) =>
             shown.map((marker) => (
               <MarkerDot
                 key={marker.recordId}
                 marker={marker}
                 position={project(marker)}
-                selected={marker.recordId === selected.recordId}
-                onSelect={() => onSelect(marker.recordId)}
+                selected={marker.recordId === selected?.recordId}
+                onSelect={() => requireLogin(() => onSelect(marker.recordId))}
               />
             ))
           }
@@ -196,7 +218,7 @@ export default function MonitorMap({ markers, totals, filter, onFilterChange, se
 
       <ZoomControls map={map} fit={fit} />
 
-      <SelectedWell marker={selected} />
+      {selected ? <SelectedWell marker={selected} /> : <LockedWell onLogin={() => requireLogin(() => {})} />}
     </section>
   );
 }

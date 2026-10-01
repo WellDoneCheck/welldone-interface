@@ -1,4 +1,4 @@
-import MapFromAddress from '../components/MapFromAddress';
+import MapFromAddress from '../../components/MapFromAddress';
 
 export const metadata = {
   title: '地圖檢視 — SkyWell',

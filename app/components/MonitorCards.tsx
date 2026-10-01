@@ -34,14 +34,17 @@ import {
   type MonitorSnapshot,
 } from '../utils/monitorLive';
 
-// Text on the dark panels: primary, secondary and muted ink. Values and labels always wear these, never a status color:
+// Text on the light panels: primary, secondary and muted ink. Values and labels always wear these, never a status color:
 // the status icon beside them carries the level.
-const INK = 'text-[#F2F1EC]';
-const INK_2 = 'text-[#F2F1EC]/70';
-const MUTED = 'text-[#F2F1EC]/45';
-const RULE = 'border-white/[0.07]';
+const INK = 'text-[#2C322F]';
+const INK_2 = 'text-[#2C322F]/70';
+const MUTED = 'text-[#2C322F]/50';
+const RULE = 'border-[#2C322F]/[0.08]';
 // the dark glyph drawn on a status icon
 const GLYPH = '#141917';
+// A light panel over the aerial photo, as the site's other cards (no backdrop blur: it would be worked out again on
+// every repaint behind it)
+const SURFACE = 'border border-[#2C322F]/10 bg-[#F7F6F1]/[0.94] shadow-[8px_8px_40px_0_rgba(0,0,0,0.25)]';
 
 /* ─── Status icons ──────────────────────────────────────────────── */
 
@@ -105,7 +108,7 @@ function Panel({ title, meta, className = '', style, children }: PanelProps) {
   return (
     <section
       aria-label={title}
-      className={`flex min-h-0 flex-col border border-white/[0.08] bg-[#141917]/[0.82] shadow-[0_12px_32px_rgba(0,0,0,0.35)] backdrop-blur-md ${className}`}
+      className={`flex min-h-0 flex-col ${SURFACE} ${className}`}
       style={style}
     >
       <header className="flex shrink-0 items-baseline justify-between gap-4 px-5 pb-3 pt-4">
@@ -114,6 +117,28 @@ function Panel({ title, meta, className = '', style, children }: PanelProps) {
       </header>
       {children}
     </section>
+  );
+}
+
+// A panel whose contents are for logged-in users: its title and frame where it will be, and a way to log in
+export function LockedPanel({ title, what, className = '', onLogin }: { title: string; what: string; className?: string; onLogin: () => void }) {
+  return (
+    <Panel title={title} className={className}>
+      <div className={`flex flex-1 flex-col items-center justify-center gap-3 border-t ${RULE} px-6 py-6 text-center`}>
+        <svg aria-hidden width="22" height="22" viewBox="0 0 22 22" fill="none" stroke="currentColor" strokeWidth="1.6" className="text-[#2C322F]/45">
+          <rect x="4" y="9.5" width="14" height="10" rx="1.5" />
+          <path d="M7.5 9.5V7a3.5 3.5 0 0 1 7 0v2.5" />
+        </svg>
+        <p className={`text-sm ${INK_2}`}>登入後可查看{what}</p>
+        <button
+          type="button"
+          onClick={onLogin}
+          className="bg-[#62A4A7] px-4 py-1.5 text-sm font-bold text-white transition-colors duration-300 hover:bg-[#54999D] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#62A4A7]"
+        >
+          登入
+        </button>
+      </div>
+    </Panel>
   );
 }
 
@@ -143,17 +168,17 @@ function Sparkline({ values, max = 100, threshold }: { values: number[]; max?: n
   const last = values[values.length - 1];
   return (
     <svg aria-hidden width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="shrink-0 overflow-visible">
-      <line x1="0" x2={width - 4} y1={y(threshold)} y2={y(threshold)} stroke="#F2F1EC" strokeOpacity="0.14" />
+      <line x1="0" x2={width - 4} y1={y(threshold)} y2={y(threshold)} stroke="#2C322F" strokeOpacity="0.14" />
       <polyline
         points={values.map((value, index) => `${x(index)},${y(value)}`).join(' ')}
         fill="none"
-        stroke="#A9B8B4"
+        stroke="#6F7468"
         strokeOpacity="0.8"
         strokeWidth="1.5"
         strokeLinejoin="round"
         strokeLinecap="round"
       />
-      <circle cx={x(values.length - 1)} cy={y(last)} r="3.5" fill={LEVEL_META[loadLevel(last)].color} stroke="#141917" strokeWidth="2" />
+      <circle cx={x(values.length - 1)} cy={y(last)} r="3.5" fill={LEVEL_META[loadLevel(last)].color} stroke="#F7F6F1" strokeWidth="2" />
     </svg>
   );
 }
@@ -175,16 +200,16 @@ export function StatusBar({ snapshot, paused, onTogglePaused, cycle }: StatusBar
   const updatedAt = new Date(snapshot.now).toLocaleTimeString('zh-TW', { hour12: false });
 
   return (
-    <div className="flex h-[52px] shrink-0 items-center gap-6 border border-white/[0.08] bg-[#141917]/[0.82] px-5 backdrop-blur-md">
+    <div className={`flex h-[52px] shrink-0 items-center gap-6 px-5 ${SURFACE}`}>
       <p className={`flex items-center gap-2.5 text-[13px] font-bold tracking-[0.12em] ${INK}`}>
         <span className="relative flex h-2.5 w-2.5">
           {!paused && <span className="absolute inset-0 animate-ping rounded-full bg-[#62A4A7] opacity-70 motion-reduce:animate-none" />}
-          <span className={`relative h-2.5 w-2.5 rounded-full ${paused ? 'bg-[#F2F1EC]/35' : 'bg-[#62A4A7]'}`} />
+          <span className={`relative h-2.5 w-2.5 rounded-full ${paused ? 'bg-[#2C322F]/30' : 'bg-[#62A4A7]'}`} />
         </span>
         {paused ? '已暫停' : '即時監控'}
       </p>
 
-      <span className="h-5 w-px bg-white/10" />
+      <span className="h-5 w-px bg-[#2C322F]/15" />
 
       <p role="status" className={`flex items-center gap-2 text-[15px] font-bold ${INK}`}>
         <StatusIcon level={health.level} size={18} />
@@ -200,7 +225,7 @@ export function StatusBar({ snapshot, paused, onTogglePaused, cycle }: StatusBar
           </time>
         </p>
         {/* how long until the next update */}
-        <div aria-hidden className="h-1 w-[96px] overflow-hidden rounded-full bg-white/10">
+        <div aria-hidden className="h-1 w-[96px] overflow-hidden rounded-full bg-[#2C322F]/10">
           <div
             key={cycle}
             className="h-full origin-left rounded-full bg-[#62A4A7]/80 [animation:monitor-countdown_linear_both] motion-reduce:hidden"
@@ -211,7 +236,7 @@ export function StatusBar({ snapshot, paused, onTogglePaused, cycle }: StatusBar
           type="button"
           onClick={onTogglePaused}
           aria-pressed={paused}
-          className={`flex items-center gap-2 border border-white/15 px-3 py-1.5 text-[13px] font-bold transition-colors duration-300 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#62A4A7] ${INK}`}
+          className={`flex items-center gap-2 border border-[#2C322F]/20 px-3 py-1.5 text-[13px] font-bold transition-colors duration-300 hover:bg-[#2C322F]/[0.06] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#62A4A7] ${INK}`}
         >
           <svg aria-hidden width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
             {paused ? <path d="M3 1.5v9l7.5-4.5Z" /> : <path d="M2.5 1.5h2.5v9H2.5ZM7 1.5h2.5v9H7Z" />}
@@ -227,7 +252,7 @@ export function StatusBar({ snapshot, paused, onTogglePaused, cycle }: StatusBar
 
 function StatTile({ label, note, children }: { label: string; note: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col justify-between border border-white/[0.08] bg-[#141917]/[0.82] px-5 py-4 backdrop-blur-md">
+    <div className={`flex flex-col justify-between px-5 py-4 ${SURFACE}`}>
       <p className={`text-sm ${INK_2}`}>{label}</p>
       <div className={`text-[40px] font-semibold leading-none tracking-tight ${INK}`}>{children}</div>
       <p className={`text-xs ${MUTED}`}>{note}</p>
@@ -273,7 +298,7 @@ export function TrendPanel() {
       meta={
         <span className="inline-flex items-center gap-2">
           近 30 天
-          <span className="inline-block w-4 border-t border-dashed border-[#F2F1EC]/50" />
+          <span className="inline-block w-4 border-t border-dashed border-[#2C322F]/50" />
           目標 {TREND_TARGET} 口／日
         </span>
       }
@@ -373,17 +398,18 @@ function PencilIcon() {
   );
 }
 
-function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRename: (id: string, name: string) => void }) {
+// onRename: renaming the task (left out, e.g. before logging in: no pencil)
+function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRename?: (id: string, name: string) => void }) {
   const [editing, setEditing] = useState(false);
   const name = taskName(task);
 
   const finishEditing = (draft: string | null) => {
     setEditing(false);
-    if (draft !== null) onRename(task.id, draft);
+    if (draft !== null) onRename?.(task.id, draft);
   };
 
   return (
-    <li className={`group/task border-t ${RULE} px-5 py-3 transition-colors duration-300 hover:bg-white/[0.04]`}>
+    <li className={`group/task border-t ${RULE} px-5 py-3 transition-colors duration-300 hover:bg-[#2C322F]/[0.04]`}>
       <div className="flex items-center gap-2.5">
         <TaskIcon task={task} />
         {editing ? (
@@ -392,7 +418,7 @@ function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRenam
             placeholder={defaultTaskName(task.createdAt)}
             label="批次名稱"
             onDone={finishEditing}
-            className={`border-[#62A4A7] text-sm placeholder:text-[#F2F1EC]/35 ${INK}`}
+            className={`border-[#62A4A7] text-sm placeholder:text-[#2C322F]/35 ${INK}`}
           />
         ) : (
           <>
@@ -400,14 +426,16 @@ function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRenam
             <Link href="/upload" suppressHydrationWarning className={`min-w-0 truncate text-sm outline-none hover:underline focus-visible:underline ${INK}`}>
               {name}
             </Link>
-            <button
-              type="button"
-              aria-label={`重新命名「${name}」`}
-              onClick={() => setEditing(true)}
-              className="shrink-0 p-1 text-[#F2F1EC]/50 opacity-0 transition-opacity duration-300 hover:text-[#F2F1EC] focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#62A4A7] group-hover/task:opacity-100"
-            >
-              <PencilIcon />
-            </button>
+            {onRename && (
+              <button
+                type="button"
+                aria-label={`重新命名「${name}」`}
+                onClick={() => setEditing(true)}
+                className="shrink-0 p-1 text-[#2C322F]/50 opacity-0 transition-opacity duration-300 hover:text-[#2C322F] focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-[#62A4A7] group-hover/task:opacity-100"
+              >
+                <PencilIcon />
+              </button>
+            )}
             <span className="flex-1" />
           </>
         )}
@@ -424,14 +452,14 @@ function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRenam
 interface TasksPanelProps {
   tasks: LiveTask[];
   now: number;
-  onRename: (id: string, name: string) => void;
+  onRename?: (id: string, name: string) => void;
 }
 
 export function TasksPanel({ tasks, now, onRename }: TasksPanelProps) {
   const count = (state: LiveTask['state']) => tasks.filter((task) => task.state === state).length;
   return (
     <Panel title="辨識任務" meta={`辨識中 ${count('running')}・排隊 ${count('queued')}・失敗 ${count('failed')}`} className="h-[382px] shrink-0">
-      <ul className="min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(242,241,236,0.2)_transparent] [scrollbar-width:thin]">
+      <ul className="min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(44,50,47,0.2)_transparent] [scrollbar-width:thin]">
         {tasks.map((task) => (
           <TaskRow key={task.id} task={task} now={now} onRename={onRename} />
         ))}
@@ -464,11 +492,11 @@ export function EventsPanel({ events, tasks, now }: { events: LiveEvent[]; tasks
   const needsLook = events.filter((event) => event.level === 'warning' || event.level === 'critical').length;
   return (
     <Panel title="警示與事件" meta={needsLook > 0 ? `${needsLook} 則需注意` : '沒有需要注意的事件'} className="flex-1">
-      <ol aria-live="polite" className="min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(242,241,236,0.2)_transparent] [scrollbar-width:thin]">
+      <ol aria-live="polite" className="min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(44,50,47,0.2)_transparent] [scrollbar-width:thin]">
         {events.map((event) => (
           <li key={event.id} className={`border-t ${RULE} [animation:monitor-event-in_600ms_var(--ease-expo)_both] motion-reduce:[animation:none]`}>
             {event.href ? (
-              <Link href={event.href} className="block px-5 py-3 outline-none transition-colors duration-300 hover:bg-white/[0.04] focus-visible:bg-white/[0.06]">
+              <Link href={event.href} className="block px-5 py-3 outline-none transition-colors duration-300 hover:bg-[#2C322F]/[0.04] focus-visible:bg-[#2C322F]/[0.06]">
                 <EventContent event={event} tasks={tasks} now={now} />
               </Link>
             ) : (

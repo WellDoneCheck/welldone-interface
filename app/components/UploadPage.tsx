@@ -249,6 +249,124 @@ function RecordEntry({ record, name, onRename, onDelete }: { record: RecordItem;
 
 /* ─── Icon components ───────────────────────────────────────────── */
 
+/* ─── Year picker ───────────────────────────────────────────────── */
+
+interface YearPickerProps {
+  // the year at the top of the list now, and the years there are
+  year: string;
+  years: string[];
+  // how the year last changed (it slides in from below when scrolling down, from above when scrolling up)
+  direction: 'up' | 'down';
+  switchCount: number;
+  onPick: (year: string) => void;
+}
+
+// The list's year, opening a menu of its years to jump to
+function YearPicker({ year, years, direction, switchCount, onPick }: YearPickerProps) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // closed by a click outside it or Escape; opening it puts the focus on the year shown
+  useEffect(() => {
+    if (!open) return;
+    listRef.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus();
+    const onPointerDown = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [open]);
+
+  // up and down move between the years
+  const moveFocus = (event: React.KeyboardEvent<HTMLUListElement>) => {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const options = [...(listRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])];
+    const at = options.indexOf(document.activeElement as HTMLButtonElement);
+    const next = event.key === 'ArrowDown' ? Math.min(at + 1, options.length - 1) : Math.max(at - 1, 0);
+    options[next]?.focus();
+  };
+
+  return (
+    <div ref={rootRef} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`年份：${year}，選擇要跳到的年份`}
+        onClick={() => setOpen((current) => !current)}
+        className="group flex items-center gap-2 border-0 bg-transparent p-0 text-[32px] font-bold leading-[45px] text-[#2C322F] transition-colors duration-300 hover:text-[#62A4A7]"
+      >
+        {/* slides in as the year changes (keyed by each change, so the slide plays again) */}
+        <span key={switchCount} className="inline-block overflow-hidden">
+          <span
+            className={`inline-block motion-reduce:animate-none ${
+              switchCount === 0 ? '' : direction === 'down' ? 'animate-[yearTextSlideUp_0.7s_cubic-bezier(0.22,1,0.36,1)]' : 'animate-[yearTextSlideDown_0.7s_cubic-bezier(0.22,1,0.36,1)]'
+            }`}
+          >
+            {year}
+          </span>
+        </span>
+        <svg
+          aria-hidden
+          width="16"
+          height="16"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`mt-1 text-[#6F7468] transition-transform duration-300 group-hover:text-[#62A4A7] ${open ? 'rotate-180' : ''}`}
+        >
+          <path d="M3.5 6l4.5 4.5L12.5 6" />
+        </svg>
+      </button>
+      {open && (
+        <ul
+          ref={listRef}
+          role="listbox"
+          aria-label="選擇年份"
+          onKeyDown={moveFocus}
+          className="absolute left-0 top-full z-30 mt-2 min-w-[150px] border border-[#2C322F]/10 bg-white py-1.5 shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
+        >
+          {years.map((option) => (
+            <li key={option}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={option === year}
+                onClick={() => {
+                  setOpen(false);
+                  onPick(option);
+                }}
+                className={`flex w-full items-center justify-between gap-6 px-4 py-2 text-left text-xl font-bold outline-none transition-colors duration-200 hover:bg-[#62A4A7]/10 focus-visible:bg-[#62A4A7]/15 ${
+                  option === year ? 'text-[#62A4A7]' : 'text-[#2C322F]'
+                }`}
+              >
+                {option}
+                {option === year && (
+                  <svg aria-hidden width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2.5 7.2l3 3 6-6.4" />
+                  </svg>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function IconButton({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) {
   return (
     <button
@@ -333,10 +451,8 @@ export default function UploadPage() {
   const yearRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const [currentYear, setCurrentYear] = useState(YEAR_GROUPS[0].year);
   const [yearDirection, setYearDirection] = useState<'up' | 'down'>('down');
-  const yearAnimKey = useRef(0);
-  const [, forceUpdate] = useState(0);
-  const yearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [yearAnimating, setYearAnimating] = useState(false);
+  // how many times the year has changed while scrolling (each change slides the new year in)
+  const [yearSwitches, setYearSwitches] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   // Local edits to the placeholder records until they are saved to the backend
@@ -376,12 +492,8 @@ export default function UploadPage() {
       const currentIdx = YEAR_GROUPS.findIndex((g) => g.year === currentYear);
       const newIdx = YEAR_GROUPS.findIndex((g) => g.year === newYear);
       setYearDirection(newIdx > currentIdx ? 'down' : 'up');
-      if (yearTimerRef.current) clearTimeout(yearTimerRef.current);
-      yearAnimKey.current += 1;
-      setYearAnimating(true);
+      setYearSwitches((count) => count + 1);
       setCurrentYear(newYear);
-      forceUpdate((n) => n + 1);
-      yearTimerRef.current = setTimeout(() => setYearAnimating(false), 800);
     }
   }, [currentYear]);
 
@@ -565,26 +677,14 @@ export default function UploadPage() {
             {/* Header with icons */}
             <div className="flex items-start justify-between pl-[46px] pr-[57px] pt-10">
               <div className="flex items-center gap-4">
-                {/* Year label — clickable, smooth slide animation */}
-                <button
-                  type="button"
-                  key={yearAnimKey.current}
-                  onClick={() => {
-                    const currentIdx = YEAR_GROUPS.findIndex((g) => g.year === currentYear);
-                    const nextIdx = (currentIdx + 1) % YEAR_GROUPS.length;
-                    scrollToYear(YEAR_GROUPS[nextIdx].year);
-                  }}
-                  className="inline-block cursor-pointer border-0 bg-transparent p-0 text-[32px] font-bold leading-[45px] text-[#2C322F] transition-colors duration-300 hover:text-[#62A4A7]"
-                  style={{
-                    animation: yearAnimating
-                      ? (yearDirection === 'down'
-                          ? 'yearTextSlideUp 0.7s cubic-bezier(0.22,1,0.36,1)'
-                          : 'yearTextSlideDown 0.7s cubic-bezier(0.22,1,0.36,1)')
-                      : 'none',
-                  }}
-                >
-                  {currentYear}
-                </button>
+                {/* the list's year: picks a year to jump to */}
+                <YearPicker
+                  year={currentYear}
+                  years={visibleGroups.map((group) => group.year)}
+                  direction={yearDirection}
+                  switchCount={yearSwitches}
+                  onPick={scrollToYear}
+                />
               </div>
               <div className="flex items-center gap-[18px]">
                 <IconButton>
@@ -635,10 +735,11 @@ export default function UploadPage() {
               </div>
             </div>
 
-            {/* Scrollable list — 37px gutter on the right holds the scroll indicator */}
+            {/* Scrollable list — 37px gutter on the right holds the scroll indicator. Positioned, so each year's offsetTop
+                is measured from the top of the list, as its scrollTop is */}
             <div
               ref={scrollRef}
-              className="scroll-indicator mb-16 ml-[37px] mr-2.5 mt-[23px] min-h-0 flex-1 overflow-y-auto"
+              className="scroll-indicator relative mb-16 ml-[37px] mr-2.5 mt-[23px] min-h-0 flex-1 overflow-y-auto"
               onScroll={handleScroll}
             >
               {visibleGroups.map((group, index) => (
@@ -649,15 +750,10 @@ export default function UploadPage() {
                   }}
                   className={index > 0 ? 'mt-[17px]' : undefined}
                 >
-                  <div
-                    className="overflow-hidden transition-all duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]"
-                    style={{
-                      maxHeight: group.year === currentYear ? '0px' : '100px',
-                      opacity: group.year === currentYear ? 0 : 1,
-                    }}
-                  >
-                    <h3 className="mb-7 text-[32px] font-bold leading-[45px] text-[#2C322F]">{group.year}</h3>
-                  </div>
+                  {/* each year's heading, but the first's: the year picker above names it. Never shown or hidden as the
+                      list scrolls: a heading changing size there moved the list under the scroll position, changed the
+                      year above and so the heading again, and the list twitched */}
+                  {index > 0 && <h3 className="mb-7 text-[32px] font-bold leading-[45px] text-[#2C322F]">{group.year}</h3>}
                   <div className="flex w-full flex-col gap-[9.4px]">
                     {group.records.map((record) => (
                       <RecordEntry

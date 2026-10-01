@@ -70,6 +70,13 @@ MapLibre 的 web worker（`maplibre-gl-worker.mjs` 與它引用的 `maplibre-gl-
 畫在空拍圖層下面。它最多到 zoom 20，更近時放大 zoom 20 的圖磚。網址設定在 `app/utils/tileServer.ts`。
 依政府資料開放授權條款需標示來源「© 內政部國土測繪中心」（已寫在圖磚來源的 attribution）。
 
+## 地圖頁與比對頁共用一張地圖
+
+`/map` 與 `/compare` 放在路由群組 `app/(survey)/` 裡，由它的 layout（`app/components/SurveyMap.tsx`）放一張共用的地圖。
+在這兩頁之間切換時 layout 不會重新掛載，地圖不必重建（WebGL、shader、樣式、圖磚），只會平移縮放到新頁的範圍；
+各頁用 `useSurveyMap(...)` 告訴它要框的範圍與點擊行為，自己的 pin／標記（icon layer）離開時會自動從地圖拿掉。
+離開群組（檢查頁、上傳頁）時地圖跟著卸載，所以推近到水井、縮回上傳列的轉場不受影響。
+
 ## 效能
 
 - titiler 官方映像預設只開 1 個 worker，所有圖磚排隊一張一張做；`docker-compose.yml` 設 `WEB_CONCURRENCY=8`

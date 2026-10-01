@@ -103,19 +103,21 @@ export default function BottomSheet({ label, onClosed, layerName, children }: Bo
 
   return (
     <div role="dialog" aria-modal="true" aria-label={label} className="fixed inset-0 z-40" style={{ viewTransitionName: layerName }}>
+      {/* a layer of its own on page changes (`${layerName}-shade`), so it can fade while the panel slides away */}
       <div
         aria-hidden
         onClick={close}
         className={`absolute inset-0 bg-[rgba(20,24,22,0.45)] transition-opacity ease-[var(--ease-expo)] motion-reduce:transition-none ${
           raised ? 'opacity-100' : 'opacity-0'
         }`}
-        style={{ transitionDuration: `${SLIDE_MS}ms` }}
+        style={{ transitionDuration: `${SLIDE_MS}ms`, viewTransitionName: layerName && `${layerName}-shade` }}
       />
 
+      {/* its shadow fades in and out as it slides (parked below the window, it would cast it over the bottom edge) */}
       <div
-        className={`absolute inset-x-0 bottom-0 flex flex-col overflow-hidden rounded-t-[28px] bg-[#F7F6F1] shadow-[0_-16px_48px_rgba(0,0,0,0.35)] will-change-transform motion-reduce:transition-none ${
-          dragY === null ? 'transition-transform ease-[var(--ease-expo)]' : ''
-        }`}
+        className={`absolute inset-x-0 bottom-0 flex flex-col overflow-hidden rounded-t-[28px] bg-[#F7F6F1] will-change-transform motion-reduce:transition-none ${
+          raised ? 'shadow-[0_-16px_48px_rgba(0,0,0,0.35)]' : 'shadow-[0_-16px_48px_rgba(0,0,0,0)]'
+        } ${dragY === null ? 'transition-[transform,box-shadow] ease-[var(--ease-expo)]' : 'transition-shadow ease-[var(--ease-expo)]'}`}
         style={{ top: CONTENT_TOP, transform: `translateY(${panelOffset})`, transitionDuration: `${SLIDE_MS}ms` }}
         onTransitionEnd={(event) => {
           if (event.target === event.currentTarget && phase === 'leaving') finish();

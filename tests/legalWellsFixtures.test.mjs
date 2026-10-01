@@ -17,12 +17,12 @@ const counts = (wells, tolerance) => {
 const SAMPLE_VARIANTS = ['01_標準範例_UTF8.csv', '02_Big5編碼.csv', '03_英文欄位.csv', '04_欄位順序不同_含備註.csv', '05_含無效座標.csv', '06_無編號欄位.csv'];
 
 for (const name of SAMPLE_VARIANTS) {
-  test(`${name} reads the 93 sample wells and compares to 72 / 22 / 21 at 15 m`, () => {
+  test(`${name} reads the 42 sample wells and compares to 33 / 12 / 9 at 15 m`, () => {
     const result = load(name);
     assert.equal(result.ok, true);
-    assert.equal(result.wells.length, 93);
-    assert.deepEqual(counts(result.wells, 15), [72, 22, 21]);
-    assert.deepEqual(counts(result.wells, 50), [81, 13, 12]);
+    assert.equal(result.wells.length, 42);
+    assert.deepEqual(counts(result.wells, 15), [33, 12, 9]);
+    assert.deepEqual(counts(result.wells, 50), [38, 7, 4]);
   });
 }
 
@@ -42,9 +42,9 @@ test('07 and 08 are rejected', () => {
 test('09 reads all 1,284 wells', () => {
   const result = load('09_大量資料_1284筆.csv');
   assert.equal(result.wells.length, 1284);
-  assert.deepEqual(counts(result.wells, 15), [72, 22, 1212]);
+  assert.deepEqual(counts(result.wells, 15), [33, 12, 1251]);
 });
 
 test('10 matches every detection', () => {
-  assert.deepEqual(counts(load('10_全部吻合.csv').wells, 15), [94, 0, 0]);
+  assert.deepEqual(counts(load('10_全部吻合.csv').wells, 15), [45, 0, 0]);
 });

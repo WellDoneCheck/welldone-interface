@@ -25,5 +25,5 @@ const SCATTERED_TILES = INNER_TILES.map((tile, index) => ({ tile, order: scatter
   .sort((a, b) => a.order - b.order)
   .map(({ tile }) => tile);
 
-// One per recognised well on the export page (105 of the 118 inner tiles), each in its own tile
-export const DETECTED_WELL_SITES: LngLat[] = SCATTERED_TILES.slice(0, 105).map(siteIn);
+// One per recognised well on the export page (50 of the 118 inner tiles), each in its own tile
+export const DETECTED_WELL_SITES: LngLat[] = SCATTERED_TILES.slice(0, 50).map(siteIn);

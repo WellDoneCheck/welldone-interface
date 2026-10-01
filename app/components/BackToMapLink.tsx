@@ -25,12 +25,12 @@ interface BackToMapLinkProps {
 // Fades out, then in, with the other page parts when the page changes.
 export default function BackToMapLink({ href, transitionTypes, mapFile, label = '返回地圖', onNavigate, children }: BackToMapLinkProps) {
   return (
-    <div className="absolute z-10 flex items-center gap-2.5" style={{ top: CONTENT_TOP, left: PAGE_GUTTER }}>
+    <div className="pointer-events-auto absolute z-10 flex items-center gap-2.5" style={{ top: CONTENT_TOP, left: PAGE_GUTTER }}>
       <Link
         href={href}
         transitionTypes={transitionTypes}
         onNavigate={onNavigate}
-        className="group flex items-center gap-2.5 bg-[#2C322F]/60 px-4 py-2 text-[20px] font-bold leading-7 text-white backdrop-blur-sm transition-colors hover:bg-[#2C322F]/80"
+        className="group flex items-center gap-2.5 bg-[#2C322F]/75 px-4 py-2 text-[20px] font-bold leading-7 text-white transition-colors hover:bg-[#2C322F]/80"
         style={pagePart('back-to-map')}
       >
         <span className="transition-transform duration-300 ease-[var(--ease-expo)] group-hover:-translate-x-1">←</span>

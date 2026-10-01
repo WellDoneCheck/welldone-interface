@@ -1,32 +1,32 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import ModelRender from './ModelRender';
 import ExportEntry from './ExportEntry';
 import CompareEntry from './CompareEntry';
 import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent, MapMouseEvent } from 'maplibre-gl';
-import TileMap, { MapShade, drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapProject, type Icon, type Project } from './TileMap';
+import { drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapLayer, useMapProject, type Icon, type Project } from './TileMap';
+import { useSurveyMap } from './SurveyMap';
 import { pinScaleExpression, pinZoomScale } from '../utils/pinZoomScale';
-import { lastMapZoom, mapCameraFor, rememberMapCamera, type MapCamera } from '../utils/mapCamera';
+import { lastMapZoom, mapCameraFor, mapImageFor, projectWithCamera, rememberMapCamera, rememberMapImage, type MapCamera } from '../utils/mapCamera';
 import SharedTransition, {
   BACK_TO_UPLOAD,
-  PageBackgroundTransition,
   SHARED,
   TO_CHECK,
-  UPLOAD_RECORD_SHARE,
   markBackToUpload,
   pagePart,
-  uploadRecordName,
 } from './SharedTransition';
 import BackToMapLink from './BackToMapLink';
 import CursorCoordinates from './CursorCoordinates';
 import type { MapWell, RecordItem } from '../data/mapRecords';
 import { mapHref } from '../utils/routeRecords';
+import { useWellVerdicts } from './useWellVerdicts';
+import { lookOf, VERDICT_COLOR, verdictOfWell, type VerdictLook } from '../utils/wellVerdicts';
 import { rememberVisit } from '../utils/lastVisit';
 import { useFitScale, type FitStage } from './useFitScale';
-import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GUTTER, useViewportSize } from './pageFrame';
+import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, useViewportSize } from './pageFrame';
 
 const CARD_WIDTH = 680;
 const CARD_HEIGHT = 869;
@@ -83,6 +83,10 @@ const VIEW_TABS: { mode: ViewMode; label: string; top: string; color: string }[]
 // The card slides in this long after arriving from the import page
 const ARRIVAL_CARD_DELAY_MS = 400;
 
+// Coming back from the check page to the map as it was left, the map is a picture of it until the page transition is
+// over (globals.css: 650-750ms) and only then started, so the work of starting it stays out of the transition's frames
+const RETURN_MAP_START_MS = 800;
+
 // Clicking a pin zooms in to at least this level (never out), with the pin in the middle of the map left of the card
 const PIN_FOCUS_ZOOM = 21;
 const PIN_FOCUS_MS = 800;
@@ -98,36 +102,62 @@ function cardLeft(viewportWidth: number, scale: number) {
 // where a hundred pins laid out by the page would all have to be placed again on every frame of a zoom. Only the
 // selected pin (raised, pinging) and the label of the pin under the pointer are page elements.
 const WELL_LAYER = 'wells';
-const PIN_IMAGE = 'well-pin';
+// A pin per verification: the pin's own red until verified, then teal for a well and grey for not one (VERDICT_COLOR)
+const PIN_IMAGE: Record<VerdictLook, string> = { pending: 'well-pin', well: 'well-pin-well', 'not-well': 'well-pin-not-well' };
 // Room around the pin in its image for the drop shadow drawn in with it
 const PIN_SHADOW_ROOM = 18;
 // The image's centre (the pin's) from the well, in the image's pixels: its tip, PIN_TIP down the pin, on the well
 const PIN_OFFSET: [number, number] = [0, PIN_SIZE * (0.5 - PIN_TIP)];
 
-// The pin with the drop shadow the page's pins have (drop-shadow 0 6px 6px), centred in room for it
-async function shadowedPin(): Promise<Record<string, Icon>> {
+// The pin (one flat colour) filled with another colour, keeping its shape and soft edges
+function tintedPin(pin: HTMLImageElement, color: string | null): CanvasImageSource {
+  if (!color) return pin;
+  const canvas = document.createElement('canvas');
+  canvas.width = pin.naturalWidth;
+  canvas.height = pin.naturalHeight;
+  const context = canvas.getContext('2d')!;
+  context.drawImage(pin, 0, 0);
+  context.globalCompositeOperation = 'source-in';
+  context.fillStyle = color;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  return canvas;
+}
+
+// The pins with the drop shadow the page's pins have (drop-shadow 0 6px 6px), centred in room for it
+async function shadowedPins(): Promise<Record<string, Icon>> {
   const pin = new window.Image();
   pin.src = '/map/pin.png';
   await pin.decode();
-  const icon = drawIcon(PIN_SIZE + 2 * PIN_SHADOW_ROOM, (context) => {
-    context.shadowColor = 'rgba(0, 0, 0, 0.35)';
-    context.shadowBlur = 12;
-    context.shadowOffsetY = 6;
-    context.drawImage(pin, PIN_SHADOW_ROOM, PIN_SHADOW_ROOM, PIN_SIZE, PIN_SIZE);
-  });
-  return { [PIN_IMAGE]: icon };
+  const icon = (color: string | null) =>
+    drawIcon(PIN_SIZE + 2 * PIN_SHADOW_ROOM, (context) => {
+      context.shadowColor = 'rgba(0, 0, 0, 0.35)';
+      context.shadowBlur = 12;
+      context.shadowOffsetY = 6;
+      context.drawImage(tintedPin(pin, color), PIN_SHADOW_ROOM, PIN_SHADOW_ROOM, PIN_SIZE, PIN_SIZE);
+    });
+  return {
+    [PIN_IMAGE.pending]: icon(null),
+    [PIN_IMAGE.well]: icon(VERDICT_COLOR.well),
+    [PIN_IMAGE['not-well']]: icon(VERDICT_COLOR['not-well']),
+  };
 }
 
-const wellFeatures = (wells: MapWell[]) => pointFeatures(wells, (well) => ({ id: well.id }));
+const wellFeatures = (wells: MapWell[], verdicts: ReturnType<typeof useWellVerdicts>) =>
+  pointFeatures(wells, (well) => ({ id: well.id, look: lookOf(verdictOfWell(well.id, verdicts)) }));
 
 // The map's layer of pins: every well but the selected one (a page element), at the page's scale and smaller the
 // further out (pinScaleExpression). onHover: the well under the pointer, or null.
 function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: string | null, scale: number, onHover: (id: string | null) => void) {
-  const ready = useIconLayer(map, WELL_LAYER, shadowedPin, { 'icon-image': PIN_IMAGE, 'icon-offset': PIN_OFFSET });
+  const ready = useIconLayer(map, WELL_LAYER, shadowedPins, {
+    'icon-image': ['match', ['get', 'look'], 'well', PIN_IMAGE.well, 'not-well', PIN_IMAGE['not-well'], PIN_IMAGE.pending],
+    'icon-offset': PIN_OFFSET,
+  });
+  // each pin in its well's verification colour, again as wells are verified (here, on the check or export page)
+  const verdicts = useWellVerdicts();
 
   useEffect(() => {
-    if (ready && map) (map.getSource(WELL_LAYER) as GeoJSONSource).setData(wellFeatures(wells));
-  }, [ready, map, wells]);
+    if (ready && map) (map.getSource(WELL_LAYER) as GeoJSONSource).setData(wellFeatures(wells, verdicts));
+  }, [ready, map, wells, verdicts]);
 
   useEffect(() => {
     if (ready && map) map.setFilter(WELL_LAYER, ['!=', ['get', 'id'], selectedId ?? '']);
@@ -152,13 +182,14 @@ function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: 
     return () => {
       map.off('mousemove', WELL_LAYER, enter);
       map.off('mouseleave', WELL_LAYER, leave);
+      // the map may stay for the next page (SurveyMap): not left with this page's pointer
+      map.getCanvas().style.cursor = '';
     };
   }, [ready, map, onHover]);
 }
 
 interface MapCanvasProps {
-  // the imported map shown (its row on the import page grows into this map) and its wells, one pin each
-  mapFileId: string;
+  // the wells of the imported map shown, one pin each
   wells: MapWell[];
   // null while no well is selected
   selected: MapWell | null;
@@ -169,16 +200,18 @@ interface MapCanvasProps {
   startCamera: MapCamera | null;
   // or else a well to start zoomed in on, as a clicked pin is, this close (e.g. one picked on the export page)
   startFocus: { well: MapWell; zoom: number } | null;
+  // a picture of the map at startCamera, shown while the map starts after the page transition
+  startImage: string | null;
   // the map, once it has started (kept by the page, which shows where the pointer is on it)
-  map: MapLibreMap | null;
-  onMapReady: (map: MapLibreMap) => void;
+  onMapReady: (map: MapLibreMap | null) => void;
   scale: number;
   onPinClick: (id: string) => void;
   onDismiss: () => void;
 }
 
-// The survey map with a pin on every well; the pins and the line to the card follow the map as it is dragged and zoomed
-function MapCanvas({ mapFileId, wells, selected, cardOpen, startsWithCard, startCamera, startFocus, map, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
+// The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
+// follow the map as it is dragged and zoomed
+function MapCanvas({ wells, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -186,9 +219,20 @@ function MapCanvas({ mapFileId, wells, selected, cardOpen, startsWithCard, start
   const camera =
     startCamera ??
     (startFocus ? { center: [startFocus.well.longitude, startFocus.well.latitude] as [number, number], zoom: startFocus.zoom, offset: focusOffset } : undefined);
+  const selectedId = selected?.id;
+
+  const map = useSurveyMap({
+    fit: stripFit(viewport, startsWithCard),
+    camera,
+    // a picture of where the map is left with a well, for coming back to it from its check page
+    onRestImage: selectedId ? (image) => rememberMapImage(selectedId, image) : undefined,
+    placeholder: startImage ?? undefined,
+    startAfter: startImage ? RETURN_MAP_START_MS : 0,
+    onMapClick: (event) => onMapClick(event),
+  });
+  useEffect(() => onMapReady(map), [map, onMapReady]);
 
   // where the map is left, with the well selected then: coming back from its check page shows it just so
-  const selectedId = selected?.id;
   useEffect(() => {
     if (!map || !selectedId) return;
     const remember = () => {
@@ -239,54 +283,60 @@ function MapCanvas({ mapFileId, wells, selected, cardOpen, startsWithCard, start
   };
 
   // a click on the map: on a pin it drew, that pin; anywhere else, closes the card
-  const onMapClick = (event: MapMouseEvent) => {
+  function onMapClick(event: MapMouseEvent) {
     const id = map ? iconAt(map, WELL_LAYER, event.point, 'id') : undefined;
     const well = wells.find((candidate) => candidate.id === id);
     if (well) pickPin(well);
     else onDismiss();
-  };
+  }
 
   return (
-    <PageBackgroundTransition>
-      <div className="absolute inset-0 overflow-hidden">
-        {/* grows out of the upload page's row for this map, and shrinks back into it (UPLOAD_RECORD_SHARE); its own
-            layer inside the page background, which keeps its own transitions to and from the check page */}
-        <SharedTransition name={uploadRecordName(mapFileId)} share={UPLOAD_RECORD_SHARE}>
-          <div className="absolute inset-0">
-            <TileMap fit={stripFit(viewport, startsWithCard)} camera={camera} interactive onMapClick={onMapClick} onReady={onMapReady}>
-              {({ project, map }) =>
-                selected || hovered ? (
-                  <>
-                    {selected && <ZoomFocus record={selected} map={map} />}
-                    {selected && (
-                      <WellMarker
-                        record={selected}
-                        corner={pinCorner(selected, project, pinScaleOn(map, scale))}
-                        size={PIN_SIZE * pinScaleOn(map, scale)}
-                        cardOpen={cardOpen}
-                        onClick={() => pickPin(selected)}
-                      />
-                    )}
-                    {hovered && <PinLabel well={hovered} corner={pinCorner(hovered, project, pinScaleOn(map, scale))} size={PIN_SIZE * pinScaleOn(map, scale)} />}
-                  </>
-                ) : null
-              }
-            </TileMap>
-            {/* the pins the map draws, as buttons for the keyboard and screen readers (the selected one is a page element) */}
-            <div className="sr-only">
-              {wells
-                .filter((well) => well.id !== selectedId)
-                .map((well) => (
-                  <button key={well.id} type="button" aria-label={`水井 ${well.id}`} aria-controls={CARD_ID} onClick={() => pickPin(well)} />
-                ))}
-            </div>
-            {/* keyed by well, so the line draws out again from each newly selected pin */}
-            {cardOpen && map && selected && <LeaderLine key={selected.id} map={map} record={selected} scale={scale} />}
-            <MapShade />
-          </div>
-        </SharedTransition>
+    <>
+      {map && (selected || hovered) && (
+        <PinOverlay map={map}>
+          {(project) => (
+            <>
+              {selected && <ZoomFocus record={selected} map={map} />}
+              {selected && (
+                <WellMarker
+                  record={selected}
+                  corner={pinCorner(selected, project, pinScaleOn(map, scale))}
+                  size={PIN_SIZE * pinScaleOn(map, scale)}
+                  cardOpen={cardOpen}
+                  onClick={() => pickPin(selected)}
+                />
+              )}
+              {hovered && <PinLabel well={hovered} corner={pinCorner(hovered, project, pinScaleOn(map, scale))} size={PIN_SIZE * pinScaleOn(map, scale)} />}
+            </>
+          )}
+        </PinOverlay>
+      )}
+      {/* the pins the map draws, as buttons for the keyboard and screen readers (the selected one is a page element) */}
+      <div className="sr-only">
+        {wells
+          .filter((well) => well.id !== selectedId)
+          .map((well) => (
+            <button key={well.id} type="button" aria-label={`水井 ${well.id}`} aria-controls={CARD_ID} onClick={() => pickPin(well)} />
+          ))}
       </div>
-    </PageBackgroundTransition>
+      {/* until the map has started, the selected pin where the map will put it (the picture has the others) */}
+      {!map && startCamera && selected && (
+        <StillPin well={selected} camera={startCamera} size={viewport} scale={scale} cardOpen={cardOpen} onClick={() => pickPin(selected)} />
+      )}
+      {/* keyed by well, so the line draws out again from each newly selected pin */}
+      {cardOpen && map && selected && <LeaderLine key={selected.id} map={map} record={selected} scale={scale} />}
+    </>
+  );
+}
+
+// What follows the map as page elements over it: slid along while the map is panned, placed afresh when it comes to
+// rest or zooms (useMapLayer)
+function PinOverlay({ map, children }: { map: MapLibreMap; children: (project: Project) => ReactNode }) {
+  const { project, layerRef } = useMapLayer(map);
+  return (
+    <div ref={layerRef} className="pointer-events-none absolute inset-0 will-change-transform">
+      {children(project)}
+    </div>
   );
 }
 
@@ -298,9 +348,14 @@ interface WellMarkerProps {
   onClick: () => void;
 }
 
-// The selected well's pin, a page element (the others are drawn by the map); clicking it toggles its card
+// The selected well's pin, a page element (the others are drawn by the map); clicking it toggles its card. Coloured
+// by its verification as the map's pins are: the pin image itself while not verified, its shape filled otherwise.
 function WellMarker({ record, corner, size, cardOpen, onClick }: WellMarkerProps) {
   const active = cardOpen;
+  const look = lookOf(verdictOfWell(record.id, useWellVerdicts()));
+  const pinClass = `relative h-auto w-full max-w-none drop-shadow-[0_6px_6px_rgba(0,0,0,0.35)] transition-transform duration-300 ${MOTION} group-hover:-translate-y-1.5 ${
+    active ? '-translate-y-1.5 scale-110' : ''
+  }`;
   return (
     <button
       type="button"
@@ -317,18 +372,86 @@ function WellMarker({ record, corner, size, cardOpen, onClick }: WellMarkerProps
       )}
       {/* the well's id above the pin on hover */}
       <span className={`${PIN_LABEL} opacity-0 transition-opacity duration-200 group-hover:opacity-100`}>{record.id}</span>
-      <Image
-        src="/map/pin.png"
-        alt=""
-        width={90}
-        height={90}
-        // not dragged off as an image: the pin stays put on the map
-        draggable={false}
-        className={`relative h-auto w-full max-w-none drop-shadow-[0_6px_6px_rgba(0,0,0,0.35)] transition-transform duration-300 ${MOTION} group-hover:-translate-y-1.5 ${
-          active ? '-translate-y-1.5 scale-110' : ''
-        }`}
-      />
+      {look === 'pending' ? (
+        <Image
+          src="/map/pin.png"
+          alt=""
+          width={90}
+          height={90}
+          // not dragged off as an image: the pin stays put on the map
+          draggable={false}
+          className={pinClass}
+        />
+      ) : (
+        <span className={`block aspect-square ${pinClass}`}>
+          <span
+            className="absolute inset-0 [mask-image:url(/map/pin.png)] [mask-size:100%_100%]"
+            style={{ backgroundColor: VERDICT_COLOR[look] }}
+          />
+        </span>
+      )}
     </button>
+  );
+}
+
+// A pin in a verification's colour, as the map draws it: its own red until verified, its shape filled otherwise
+function PinSwatch({ look, size }: { look: VerdictLook; size: number }) {
+  if (look === 'pending') return <Image src="/map/pin.png" alt="" width={size} height={size} draggable={false} className="shrink-0" />;
+  return (
+    <span
+      className="block shrink-0 [mask-image:url(/map/pin.png)] [mask-size:100%_100%]"
+      style={{ width: size, height: size, backgroundColor: VERDICT_COLOR[look] }}
+    />
+  );
+}
+
+const LEGEND: { look: VerdictLook; label: string }[] = [
+  { look: 'pending', label: '未驗證' },
+  { look: 'well', label: '已驗證：是井' },
+  { look: 'not-well', label: '已驗證：不是井' },
+];
+
+// The compare page's stage, whose scale its corners (the export shortcut, the legend) are drawn at: this page's corners
+// are the same size, so moving between the two pages they stay put
+const CORNER_STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY: 0, minViewportWidth: 0 };
+
+// What the pins' colours mean, in the corner the card covers: shown while no card is, fading out as one opens and back
+// in as it closes. Where and as large as the compare page's legend: against the navbar's right edge, just above the
+// window's bottom.
+function MapLegend({ hidden }: { hidden: boolean }) {
+  const scale = useFitScale(CORNER_STAGE);
+  return (
+    <div
+      aria-hidden={hidden}
+      className={`absolute transition-opacity duration-500 ${MOTION} ${hidden ? 'opacity-0' : 'opacity-100'}`}
+      style={{ ...pagePart('map-legend'), right: PAGE_GUTTER, bottom: PAGE_GAP }}
+    >
+      <div className="flex flex-col gap-[14px] bg-[#F7F6F1]/92 py-[22px] pl-[26px] pr-[32px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]" style={{ zoom: scale }}>
+        <span className="text-[18px] font-bold text-[#6F7468]">圖例</span>
+        {LEGEND.map((entry) => (
+          <span key={entry.look} className="flex items-center gap-[12px] text-[21px] font-bold text-[#2C322F]">
+            <PinSwatch look={entry.look} size={30} />
+            {entry.label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// The selected pin before the map has started, placed by the camera it will start at
+function StillPin({ well, camera, size, scale, cardOpen, onClick }: { well: MapWell; camera: MapCamera; size: { width: number; height: number }; scale: number; cardOpen: boolean; onClick: () => void }) {
+  const pinScale = scale * pinZoomScale(camera.zoom);
+  return (
+    <div className="pointer-events-none absolute inset-0">
+      <WellMarker
+        record={well}
+        corner={pinCorner(well, (point) => projectWithCamera(camera, size, point), pinScale)}
+        size={PIN_SIZE * pinScale}
+        cardOpen={cardOpen}
+        onClick={onClick}
+      />
+    </div>
   );
 }
 
@@ -430,9 +553,9 @@ function ViewTab({ mode, label, top, color, active, onSelect }: ViewTabProps) {
 
 // Aerial: tile preview (will come from titiler).
 // Model: fake 3D render (click to generate), offset 4/6px inside the card as in Figma.
-function WellPhoto({ viewMode, wellId, shared }: { viewMode: ViewMode; wellId: string; shared: boolean }) {
+function WellPhoto({ viewMode, wellId, shared, showing }: { viewMode: ViewMode; wellId: string; shared: boolean; showing: boolean }) {
   if (viewMode === 'aerial') return <VerifyLink wellId={wellId} shared={shared} />;
-  return <ModelRender />;
+  return <ModelRender playing={showing} />;
 }
 
 // The aerial photo is the way into the verification page for this well
@@ -464,19 +587,21 @@ interface CardFaceProps {
   shared: boolean;
   faceMode: ViewMode;
   viewMode: ViewMode;
+  // this face is the one seen, on an open card (its moving parts only move then)
+  showing: boolean;
   onViewModeChange: (mode: ViewMode) => void;
   className?: string;
 }
 
 // One side of the film: photo, well info and the tabs bound to it. Inert (not clickable, focusable or read out) while facing away.
-function CardFace({ record, shared, faceMode, viewMode, onViewModeChange, className = '' }: CardFaceProps) {
+function CardFace({ record, shared, faceMode, viewMode, showing, onViewModeChange, className = '' }: CardFaceProps) {
   return (
     <div
       inert={viewMode !== faceMode}
       className={`absolute inset-0 bg-[#F7F6F1] p-4 shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)] [backface-visibility:hidden] ${className}`}
     >
       <div className="h-[640px] w-[640px]">
-        <WellPhoto viewMode={faceMode} wellId={record.id} shared={shared} />
+        <WellPhoto viewMode={faceMode} wellId={record.id} shared={shared} showing={showing} />
       </div>
 
       <SharedTransition name={SHARED.wellId} enabled={shared}>
@@ -517,12 +642,13 @@ function InfoCard({ record, open, viewMode, onViewModeChange }: InfoCardProps) {
           flipped ? '[transform:rotateY(180deg)]' : '[transform:rotateY(0deg)]'
         }`}
       >
-        <CardFace record={record} shared={open} faceMode="aerial" viewMode={viewMode} onViewModeChange={onViewModeChange} />
+        <CardFace record={record} shared={open} faceMode="aerial" viewMode={viewMode} showing={open && !flipped} onViewModeChange={onViewModeChange} />
         <CardFace
           record={record}
           shared={false}
           faceMode="model"
           viewMode={viewMode}
+          showing={open && flipped}
           onViewModeChange={onViewModeChange}
           className="[transform:rotateY(180deg)]"
         />
@@ -563,11 +689,13 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
   // back from the check page: the map as it was left with this well; a well opened elsewhere (e.g. picked on the export
   // page) is zoomed in on as a clicked pin is, at least as close as the map was left
   const [returnView] = useState(() => {
-    if (!cardOpenAtStart || !initialWell) return { camera: null, focus: null };
+    if (!cardOpenAtStart || !initialWell) return { camera: null, focus: null, image: null };
     const camera = mapCameraFor(initialWell.id);
-    return { camera, focus: camera ? null : { well: initialWell, zoom: Math.max(lastMapZoom() ?? 0, PIN_FOCUS_ZOOM) } };
+    if (camera) return { camera, focus: null, image: mapImageFor(initialWell.id) };
+    return { camera: null, focus: { well: initialWell, zoom: Math.max(lastMapZoom() ?? 0, PIN_FOCUS_ZOOM) }, image: null };
   });
   const scale = useFitScale(OVERLAY_STAGE);
+  const cornerScale = useFitScale(CORNER_STAGE);
   const [map, setMap] = useState<MapLibreMap | null>(null);
 
   // the navbar's 地圖檢視 comes back to the map shown last
@@ -604,16 +732,16 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
   }, []);
 
   return (
-    <div className="relative h-screen overflow-hidden" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
+    // over the shared survey map (SurveyMap): lets drags and clicks through to it, except on its own parts
+    <div className="pointer-events-none relative h-screen overflow-hidden" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
       <MapCanvas
-        mapFileId={mapFile.id}
         wells={wells}
         selected={record}
         cardOpen={cardOpen}
         startsWithCard={startsWithCard}
         startCamera={returnView.camera}
         startFocus={returnView.focus}
-        map={map}
+        startImage={returnView.image}
         onMapReady={setMap}
         scale={scale}
         onPinClick={selectPin}
@@ -626,13 +754,15 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
         <CursorCoordinates map={map} />
       </BackToMapLink>
 
-      {/* lined up with the navbar's left edge; bottom edge lines up with the well card's */}
-      <div className="absolute -translate-y-full" style={{ ...pagePart('map-shortcuts'), left: PAGE_GUTTER, top: CONTENT_TOP + CARD_HEIGHT * scale }}>
-        <div className="flex gap-[12px]" style={{ zoom: scale }}>
+      {/* in the bottom left corner, against the navbar's left edge, as on the compare page (and as large) */}
+      <div className="pointer-events-auto absolute" style={{ ...pagePart('map-shortcuts'), left: PAGE_GUTTER, bottom: PAGE_GAP }}>
+        <div className="flex gap-[12px]" style={{ zoom: cornerScale }}>
           <ExportEntry />
           <CompareEntry recordId={mapFile.id} />
         </div>
       </div>
+
+      <MapLegend hidden={cardOpen} />
 
       <div className="pointer-events-none absolute" style={{ ...pagePart('map-card'), top: CONTENT_TOP, right: PAGE_GUTTER + TAB_OVERHANG * scale }}>
         <div

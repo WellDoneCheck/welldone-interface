@@ -26,10 +26,10 @@ const REMEMBERED_ITEM_ENTER = 'overflow-hidden animate-[nav-item-in_700ms_var(--
 // Each item is named after the page it opens (the account lives in the login panel, the upload records on 影像匯入與紀錄).
 // 地圖檢視 and 水井檢查 go back to the map record / the well opened last, and are left out until there is one.
 const NAV_ITEMS: { label: string; href?: string; lastVisit?: VisitedPage }[] = [
-  { label: '首頁', href: '/' },
+  // { label: '首頁', href: '/' },
+  { label: '影像匯入與紀錄', href: '/upload' },
   { label: '地圖檢視', lastVisit: 'map' },
   { label: '水井檢查', lastVisit: 'check' },
-  { label: '影像匯入與紀錄', href: '/upload' },
   { label: '監控總覽', href: '/monitor' },
 ];
 

@@ -25,6 +25,7 @@ const PANEL_HEIGHT = 702;
 const INFO_WIDTH = 560;
 const OVERLAY_STAGE: FitStage = { width: INFO_WIDTH + 60 + 972, height: PANEL_HEIGHT, marginX: FRAME_MARGIN_X, marginY: FRAME_MARGIN_Y, minViewportWidth: 0 };
 
+// 是井 in the teal a verified well wears everywhere (VERDICT_COLOR); 不是井 keeps the page's own red
 const VERDICTS: { verdict: WellVerdict; label: string; color: string }[] = [
   { verdict: 'not-well', label: '不是井', color: 'bg-[#BC5646]' },
   { verdict: 'well', label: '是井', color: 'bg-[#62A4A7]' },

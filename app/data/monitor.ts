@@ -15,14 +15,15 @@ export const STATUS_META: Record<WellStatus, { label: string; dot: string }> = {
 /* ─── Status levels ─────────────────────────────────────────────── */
 
 // How healthy something is (a service, a task, the whole system) or how urgent an event is. The colors are reserved
-// for these levels and always shown with an icon and a label (checked for color vision deficiency on the dark panels).
+// for these levels and always shown with an icon and a label (checked for color vision deficiency on the light panels:
+// the site's teal, a slate grey, and its amber and brick red).
 export type Level = 'good' | 'info' | 'warning' | 'critical';
 
 export const LEVEL_META: Record<Level, { label: string; color: string }> = {
   good: { label: '正常', color: '#62A4A7' },
-  info: { label: '通知', color: '#A9B8B4' },
-  warning: { label: '注意', color: '#E0B24A' },
-  critical: { label: '異常', color: '#E5534B' },
+  info: { label: '通知', color: '#7E8C88' },
+  warning: { label: '注意', color: '#D9A441' },
+  critical: { label: '異常', color: '#BC5646' },
 };
 
 export const WELL_TOTALS: Record<WellStatus, number> = { verified: 1284, pending: 96, rejected: 13 };

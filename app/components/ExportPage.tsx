@@ -2,7 +2,7 @@
 
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useWellVerdicts } from './useWellVerdicts';
-import { setWellVerdict, verdictOf } from '../utils/wellVerdicts';
+import { lookOf, setWellVerdict, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useFitScale, type FitStage } from './useFitScale';
@@ -25,23 +25,27 @@ const TOP_SPACE = { page: 238, sheet: 24 };
 // Share of the hero height from where the page is plain paper, so the navbar needs dark text over it
 const HERO_PAPER_FROM = 0.85;
 
-type SectionKind = 'verified' | 'pending';
+// A section per verification, in the colours the map's pins wear (VERDICT_COLOR: teal a well, grey not one, red not
+// yet verified); the counts on top and each card's tag the same
+type SectionKind = VerdictLook;
+const SECTION_ORDER: SectionKind[] = ['well', 'not-well', 'pending'];
 
-const SECTIONS: Record<SectionKind, { title: string; countColor: string }> = {
-  verified: { title: '已驗證的水井', countColor: 'text-[#62A4A7]' },
-  pending: { title: '未驗證的水井', countColor: 'text-[#8A611C]' },
+const SECTIONS: Record<SectionKind, { title: string; count: string; countColor: string }> = {
+  well: { title: '已驗證：是井', count: '是井 Well', countColor: 'text-[#62A4A7]' },
+  'not-well': { title: '已驗證：不是井', count: '不是井 Not a well', countColor: 'text-[#8A8F8C]' },
+  pending: { title: '未驗證的水井', count: '未驗證 Pending', countColor: 'text-[#BC5646]' },
 };
 
 const VERDICT_BUTTONS: { verdict: WellVerdict; label: string; className: string }[] = [
-  { verdict: 'not-well', label: '不是井', className: 'border-[4px] border-[#BC5646] text-[#98412F]' },
+  { verdict: 'not-well', label: '不是井', className: 'border-[4px] border-[#8A8F8C] text-[#5E625F]' },
   { verdict: 'well', label: '是井', className: 'bg-[#62A4A7] text-[#FBFBF8]' },
 ];
 
-function badgeFor(verdict: WellVerdict | null): { label: string; className: string } {
-  if (verdict === 'well') return { label: '已驗證', className: 'bg-[rgba(209,230,231,0.9)] text-[#3F7A7E]' };
-  if (verdict === 'not-well') return { label: '已驗證', className: 'bg-[rgba(247,229,223,0.8)] text-[#98412F]' };
-  return { label: '未驗證', className: 'bg-[rgba(248,235,209,0.8)] text-[#8A611C]' };
-}
+const BADGES: Record<SectionKind, { label: string; className: string }> = {
+  well: { label: '是井', className: 'bg-[rgba(209,230,231,0.92)] text-[#3F7A7E]' },
+  'not-well': { label: '不是井', className: 'bg-[rgba(228,229,227,0.92)] text-[#55595A]' },
+  pending: { label: '未驗證', className: 'bg-[rgba(247,229,223,0.92)] text-[#98412F]' },
+};
 
 /* ─── Selection circle ──────────────────────────────────────────── */
 
@@ -69,7 +73,7 @@ function SelectCircle({ checked, size, label, onToggle }: { checked: boolean; si
 
 function CountColumn({ count, countColor, label }: { count: number; countColor: string; label: string }) {
   return (
-    <div className="flex w-[449px] flex-col items-center pt-[48px] font-bold text-[#2C322F]">
+    <div className="flex w-[300px] flex-col items-center pt-[48px] font-bold text-[#2C322F]">
       <p className={`text-[64px] leading-none ${countColor}`}>{count}</p>
       <p className="mt-[14px] text-[28px] leading-[normal]">口井</p>
       <p className="mt-[40px] text-[20px] leading-[normal]">{label}</p>
@@ -97,15 +101,14 @@ function ExportAction({ selectedCount, onExport }: { selectedCount: number; onEx
 }
 
 interface HeroSummaryProps {
-  verifiedCount: number;
-  pendingCount: number;
+  counts: Record<SectionKind, number>;
   selectedCount: number;
   onExport: () => void;
   // on the sheet's plain paper the card is white with a soft shadow; over the page's aerial photo it is frosted glass
   onPaper: boolean;
 }
 
-function HeroSummary({ verifiedCount, pendingCount, selectedCount, onExport, onPaper }: HeroSummaryProps) {
+function HeroSummary({ counts, selectedCount, onExport, onPaper }: HeroSummaryProps) {
   return (
     <div
       className={`relative mx-[60px] flex h-[340px] ${
@@ -116,8 +119,9 @@ function HeroSummary({ verifiedCount, pendingCount, selectedCount, onExport, onP
         <p className="w-[280px] text-[20px] leading-[1.6]">管理並匯出 AI 水井辨識結果，支援多種地理資訊格式以利後續分析與建檔。</p>
         <h1 className="text-[36px] leading-[normal]">資料匯出</h1>
       </div>
-      <CountColumn count={verifiedCount} countColor="text-[#62A4A7]" label="已驗證 Verified" />
-      <CountColumn count={pendingCount} countColor="text-[#8A611C]" label="未驗證 Pending" />
+      {SECTION_ORDER.map((kind) => (
+        <CountColumn key={kind} count={counts[kind]} countColor={SECTIONS[kind].countColor} label={SECTIONS[kind].count} />
+      ))}
       <ExportAction selectedCount={selectedCount} onExport={onExport} />
     </div>
   );
@@ -145,10 +149,10 @@ interface WellCardProps {
 }
 
 function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellCardProps) {
-  const badge = badgeFor(well.verdict);
+  const badge = BADGES[lookOf(well.verdict)];
 
   return (
-    // cards scrolled out of the row are not rendered until they come into view (105 cards with large shadows)
+    // cards scrolled out of the row are not rendered until they come into view (50 cards with large shadows)
     <article className="w-[320px] shrink-0 snap-start bg-white pb-[16px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] [contain-intrinsic-size:auto_320px_auto_440px] [content-visibility:auto]">
       <div className="relative h-[320px] w-[320px]">
         {/* the photo opens this well on the check page to compare its captures; clicking it first marks this card as the
@@ -367,8 +371,7 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [openingId, setOpeningId] = useState<string | null>(null);
 
-  const verifiedWells = wells.filter((well) => well.verdict !== null);
-  const pendingWells = wells.filter((well) => well.verdict === null);
+  const wellsOf = (kind: SectionKind) => wells.filter((well) => lookOf(well.verdict) === kind);
 
   const toggleWell = (id: string) =>
     setSelectedIds((current) => {
@@ -389,14 +392,14 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
   const content = (
     <div className="relative mx-auto w-[1920px] pb-[160px]" style={{ zoom: scale, paddingTop: inSheet ? TOP_SPACE.sheet : TOP_SPACE.page }}>
       <HeroSummary
-        verifiedCount={verifiedWells.length}
-        pendingCount={pendingWells.length}
+        counts={{ well: wellsOf('well').length, 'not-well': wellsOf('not-well').length, pending: wellsOf('pending').length }}
         selectedCount={selectedIds.size}
         onExport={() => downloadCsv(CSV_FILE_NAME, buildWellsCsv(wells.filter((well) => selectedIds.has(well.id))))}
         onPaper={inSheet}
       />
-      <WellSection kind="verified" wells={verifiedWells} {...sectionProps} />
-      <WellSection kind="pending" wells={pendingWells} {...sectionProps} />
+      {SECTION_ORDER.map((kind) => (
+        <WellSection key={kind} kind={kind} wells={wellsOf(kind)} {...sectionProps} />
+      ))}
     </div>
   );
 

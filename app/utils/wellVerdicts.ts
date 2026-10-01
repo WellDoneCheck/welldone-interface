@@ -1,7 +1,7 @@
 // Whether each well is a well, as people verify it on the check and export pages, shared by those pages and the map
 // page's export shortcut (its verified / pending counts). Kept over the placeholder verdicts (exportWells.ts) in
 // localStorage until the backend stores them; where storage is blocked, they last until the page is reloaded.
-import type { WellVerdict } from '../data/exportWells';
+import { findExportWell, type WellVerdict } from '../data/exportWells';
 
 type Verdicts = Record<string, WellVerdict>;
 
@@ -33,6 +33,22 @@ export const getServerWellVerdicts = () => NO_VERDICTS;
 export function verdictOf(well: { id: string; verdict?: WellVerdict | null }, from: Verdicts = getWellVerdicts()): WellVerdict | null {
   return from[well.id] ?? well.verdict ?? null;
 }
+
+// A well anywhere (e.g. a pin on the map) by its id: as verified here, or as it came on the export page, or not yet
+export function verdictOfWell(id: string, from: Verdicts = getWellVerdicts()): WellVerdict | null {
+  return verdictOf({ id, verdict: findExportWell(id)?.verdict }, from);
+}
+
+// What a well's verification looks like wherever it shows (map pins, the export page's sections and tags, the check
+// page's buttons): not verified yet, verified to be a well, verified not to be one
+export type VerdictLook = WellVerdict | 'pending';
+export const VERDICT_COLOR: Record<VerdictLook, string> = {
+  pending: '#BC5646',
+  // the site's teal, as the export button
+  well: '#62A4A7',
+  'not-well': '#8A8F8C',
+};
+export const lookOf = (verdict: WellVerdict | null): VerdictLook => verdict ?? 'pending';
 
 export function setWellVerdict(id: string, verdict: WellVerdict): void {
   verdicts = { ...getWellVerdicts(), [id]: verdict };

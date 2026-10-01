@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent } from '
 import { useFitScale, type FitStage } from './useFitScale';
 import ExportEntry from './ExportEntry';
 import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
-import TileMap, { MapShade, drawIcon, iconAt, pointFeatures, useIconLayer, useMapLayer, type Bounds as GeoBounds, type Icon } from './TileMap';
+import { drawIcon, iconAt, pointFeatures, useIconLayer, useMapLayer, type Bounds as GeoBounds, type Icon } from './TileMap';
+import { useSurveyMap } from './SurveyMap';
 import BackToMapLink, { BACK_LINK_HEIGHT } from './BackToMapLink';
 import CursorCoordinates from './CursorCoordinates';
-import SharedTransition, { PageBackgroundTransition, SHARED, pagePart } from './SharedTransition';
+import SharedTransition, { SHARED, pagePart } from './SharedTransition';
 import { CONTENT_TOP, PAGE_GAP, PAGE_GUTTER, useViewportSize, type ViewportSize } from './pageFrame';
 import { EXPORT_WELLS } from '../data/exportWells';
 import type { RecordItem } from '../data/mapRecords';
@@ -677,7 +678,12 @@ export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
     }),
     [register, mapLeft, mapTop, mapWidth, mapHeight, layout.width, layout.height, scale],
   );
-  const [map, setMap] = useState<MapLibreMap | null>(null);
+  // the survey map shared with the map page (SurveyMap), fitted here to the wells beside the panel; clicking it picks the
+  // marker there, or closes the well's card
+  const map = useSurveyMap({
+    fit,
+    onMapClick: (event) => setSelectedKey((map && iconAt(map, MARKER_LAYER, event.point, 'key')) || null),
+  });
   const selected = items.find((item) => item.key === selectedKey) ?? null;
   useMarkerLayer(map, comparison ? items : null, filter, selectedKey, scale);
 
@@ -719,19 +725,8 @@ export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
   };
 
   return (
-    <div className="relative h-screen overflow-hidden bg-[#2C322F]" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
-      {/* the survey map, dragged and zoomed like on the map page; clicking the map itself closes the well's card */}
-      <PageBackgroundTransition>
-        <div className="absolute inset-0 overflow-hidden">
-          <TileMap
-            fit={fit}
-            interactive
-            onMapClick={(event) => setSelectedKey((map && iconAt(map, MARKER_LAYER, event.point, 'key')) || null)}
-            onReady={setMap}
-          />
-          <MapShade />
-        </div>
-      </PageBackgroundTransition>
+    // over the shared survey map (SurveyMap): lets drags and clicks through to it, except on its own parts
+    <div className="pointer-events-none relative h-screen overflow-hidden" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
 
       {/* lets drags and clicks through to the map, except on the markers, cards and panel */}
       <div className="pointer-events-none absolute inset-0">

@@ -50,9 +50,9 @@ export default function TrendChart({ data, target, firstDay }: TrendChartProps) 
           </linearGradient>
         </defs>
 
-        <line x1={PAD.left} x2={WIDTH - PAD.right} y1={yAt(0)} y2={yAt(0)} stroke="#F2F1EC" strokeOpacity="0.14" />
+        <line x1={PAD.left} x2={WIDTH - PAD.right} y1={yAt(0)} y2={yAt(0)} stroke="#2C322F" strokeOpacity="0.14" />
         {/* the daily target: dashed, as a threshold rather than a gridline */}
-        <line x1={PAD.left} x2={WIDTH - PAD.right} y1={yAt(target)} y2={yAt(target)} stroke="#F2F1EC" strokeOpacity="0.5" strokeDasharray="4 4" />
+        <line x1={PAD.left} x2={WIDTH - PAD.right} y1={yAt(target)} y2={yAt(target)} stroke="#2C322F" strokeOpacity="0.5" strokeDasharray="4 4" />
 
         <path d={area} fill="url(#trend-fill)" />
         <path d={line} fill="none" stroke="#62A4A7" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
@@ -64,8 +64,8 @@ export default function TrendChart({ data, target, firstDay }: TrendChartProps) 
               x={xAt(index, data.length)}
               y={HEIGHT - 5}
               fontSize="10"
-              fill="#F2F1EC"
-              fillOpacity="0.45"
+              fill="#2C322F"
+              fillOpacity="0.5"
               textAnchor={index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle'}
             >
               {dayLabel(firstDay, index)}
@@ -75,15 +75,15 @@ export default function TrendChart({ data, target, firstDay }: TrendChartProps) 
 
         {hovered !== null && (
           <g>
-            <line x1={xAt(hovered, data.length)} x2={xAt(hovered, data.length)} y1={PAD.top} y2={yAt(0)} stroke="#F2F1EC" strokeOpacity="0.3" />
-            <circle cx={xAt(hovered, data.length)} cy={yAt(data[hovered])} r="4" fill="#62A4A7" stroke="#141917" strokeWidth="2" />
+            <line x1={xAt(hovered, data.length)} x2={xAt(hovered, data.length)} y1={PAD.top} y2={yAt(0)} stroke="#2C322F" strokeOpacity="0.3" />
+            <circle cx={xAt(hovered, data.length)} cy={yAt(data[hovered])} r="4" fill="#62A4A7" stroke="#F7F6F1" strokeWidth="2" />
           </g>
         )}
       </svg>
 
       {hovered !== null && (
         <div
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-full whitespace-nowrap border border-white/10 bg-[#0E1211] px-2 py-1 text-xs font-bold text-[#F2F1EC]"
+          className="pointer-events-none absolute -translate-x-1/2 -translate-y-full whitespace-nowrap bg-[#2C322F] px-2 py-1 text-xs font-bold text-[#F7F6F1]"
           style={{
             left: `${(xAt(hovered, data.length) / WIDTH) * 100}%`,
             top: `${(yAt(data[hovered]) / HEIGHT) * 100}%`,

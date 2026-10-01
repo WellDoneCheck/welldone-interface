@@ -16,7 +16,7 @@ export interface ExportWell {
   verdict: WellVerdict | null;
 }
 
-const VERIFIED_COUNT = 100;
+const VERIFIED_COUNT = 45;
 const PENDING_COUNT = 5;
 // The 2023 map finished recognising: these are its wells (same ids and sites as in mapRecords.ts)
 const SOURCE_MAP = YEAR_GROUPS.find((group) => group.year === '2023')!.records.find((record) => record.status === 'done')!.id;

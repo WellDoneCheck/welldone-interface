@@ -8,7 +8,7 @@ export default function CompareEntry({ recordId }: { recordId: string }) {
     <SharedTransition name={SHARED.compareArea}>
       <Link href={`/compare?record=${encodeURIComponent(recordId)}`} className="group block w-fit outline-none focus-visible:shadow-[0_0_0_4px_#62A4A7]">
         {/* only the contents lift on hover, like the export shortcut beside it */}
-        <span className="flex h-[84px] items-center gap-[14px] bg-[rgba(247,246,241,0.88)] px-[22px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] backdrop-blur-md transition-transform duration-500 ease-[var(--ease-expo)] group-hover:-translate-y-1">
+        <span className="flex h-[84px] items-center gap-[14px] bg-[rgba(247,246,241,0.95)] px-[22px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] transition-transform duration-500 ease-[var(--ease-expo)] group-hover:-translate-y-1">
           <span className="flex h-[40px] w-[40px] shrink-0 items-center justify-center bg-[#62A4A7] text-[13px] font-black text-white">CSV</span>
           <span className="flex flex-col">
             <span className="text-[20px] font-bold leading-none text-[#2C322F]">合法井比對</span>

@@ -26,8 +26,8 @@ test('imported maps are identified by uuid, apart from their wells', () => {
 });
 
 test('a map has wells as far as it has been recognised', () => {
-  for (const record of byStatus('done')) assert.equal(wellsOf(record.id).length, 105);
-  for (const record of byStatus('recognizing')) assert.equal(wellsOf(record.id).length, Math.round((105 * record.current) / record.total));
+  for (const record of byStatus('done')) assert.equal(wellsOf(record.id).length, 50);
+  for (const record of byStatus('recognizing')) assert.equal(wellsOf(record.id).length, Math.round((50 * record.current) / record.total));
   for (const record of byStatus('cutting')) assert.equal(wellsOf(record.id).length, 0);
 });
 
@@ -49,7 +49,7 @@ test('the export page wells are the wells of the finished 2023 map', () => {
 test('map: a map opened from the import page shows its wells with none selected', () => {
   const view = resolveMapRoute(doneMap.id, null, null);
   assert.equal(view.record.id, doneMap.id);
-  assert.equal(view.wells.length, 105);
+  assert.equal(view.wells.length, 50);
   assert.equal(view.well, null);
   assert.equal(view.openCardOnArrival, false);
   assert.equal(view.cardOpenAtStart, false);

@@ -28,7 +28,7 @@ export default function CursorCoordinates({ map }: { map: MapLibreMap | null }) 
   return (
     <div
       aria-hidden
-      className={`flex items-center gap-2 bg-[#2C322F]/60 px-4 py-2 text-[20px] font-bold leading-7 text-white tabular-nums backdrop-blur-sm transition-opacity duration-300 ${
+      className={`flex items-center gap-2 bg-[#2C322F]/75 px-4 py-2 text-[20px] font-bold leading-7 text-white tabular-nums transition-opacity duration-300 ${
         over ? 'opacity-100' : 'opacity-0'
       }`}
       style={pagePart('map-cursor')}
