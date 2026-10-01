@@ -1,5 +1,7 @@
 // Wells recognised by the AI, listed on the export page.
-// Placeholder data until wells come from the backend.
+// Placeholder data until wells come from the backend; they stand on the test sites in testWellSites.ts.
+import { DETECTED_WELL_SITES } from './testWellSites';
+import { YEAR_GROUPS } from './mapRecords';
 
 export type WellVerdict = 'well' | 'not-well';
 
@@ -8,42 +10,24 @@ export interface ExportWell {
   latitude: number;
   longitude: number;
   capturedAt: string;
+  // the imported map (a map record's id) it was found in
+  mapRecordId: string;
   // null until someone has verified the recognition
   verdict: WellVerdict | null;
 }
 
 const VERIFIED_COUNT = 100;
 const PENDING_COUNT = 5;
-
-// Wells are scattered over a ~5 km square on a 0.001° (~100 m) grid
-const GRID_STEP = 0.001;
-const GRID_CELLS = 50;
-
-// Deterministic pseudo-random number in [0, 1) so the placeholder layout is the same on server and client
-function scatter(index: number, salt: number): number {
-  const x = Math.sin(index * 12.9898 + salt * 78.233) * 43758.5453;
-  return x - Math.floor(x);
-}
-
-// Grid cell of every well; a well landing on a taken cell moves north to the next free one
-const CELLS = (() => {
-  const taken = new Set<string>();
-  return Array.from({ length: VERIFIED_COUNT + PENDING_COUNT }, (_, index) => {
-    let row = Math.floor(scatter(index, 1) * GRID_CELLS);
-    const column = Math.floor(scatter(index, 2) * GRID_CELLS);
-    while (taken.has(`${row},${column}`)) row = (row + 1) % GRID_CELLS;
-    taken.add(`${row},${column}`);
-    return { row, column };
-  });
-})();
+// The 2023 map finished recognising: these are its wells (same ids and sites as in mapRecords.ts)
+const SOURCE_MAP = YEAR_GROUPS.find((group) => group.year === '2023')!.records.find((record) => record.status === 'done')!.id;
 
 function buildWell(index: number, verdict: WellVerdict | null): ExportWell {
   const day = String((index % 28) + 1).padStart(2, '0');
   return {
     id: `SW-2023-A${String(index + 1).padStart(3, '0')}`,
-    latitude: Number((23.456 + CELLS[index].row * GRID_STEP).toFixed(3)),
-    longitude: Number((120.123 + CELLS[index].column * GRID_STEP).toFixed(3)),
+    ...DETECTED_WELL_SITES[index],
     capturedAt: `2023-10-${day} 14:30`,
+    mapRecordId: SOURCE_MAP,
     verdict,
   };
 }
@@ -59,5 +43,5 @@ export function findExportWell(id: string | undefined): ExportWell | undefined {
 }
 
 export function formatCoordinates(well: ExportWell): string {
-  return `${well.latitude.toFixed(3)}, ${well.longitude.toFixed(3)}`;
+  return `${well.latitude.toFixed(5)}, ${well.longitude.toFixed(5)}`;
 }

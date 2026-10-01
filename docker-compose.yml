@@ -1,0 +1,32 @@
+# Map tile server for the map pages: titiler reads the splitter's cut tiles (COGs) and serves them as web map tiles.
+#   docker compose up -d
+# TILES_DIR is the splitter's output folder holding one folder per task (default: the splitter checked out next to
+# this project); it is mounted read-only. See docs/map-tiles.md.
+# Host port 8080 is also the splitter's: run them on different machines, or move one of them.
+services:
+  titiler:
+    image: ghcr.io/developmentseed/titiler:latest
+    container_name: well-titiler
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      - TITILER_API_CORS_ORIGINS=*
+      # the image starts a single worker: with several, a screenful of tiles is made side by side instead of one by one
+      - WEB_CONCURRENCY=8
+      # let browsers keep the tiles (the imagery does not change)
+      - TITILER_API_CACHECONTROL=public, max-age=86400
+      # every web tile reads from several of the 154 source tiles: keep their blocks and headers in memory
+      - GDAL_CACHEMAX=1024
+      - VSI_CACHE=TRUE
+      - VSI_CACHE_SIZE=536870912
+      - GDAL_DISABLE_READDIR_ON_OPEN=EMPTY_DIR
+      - GDAL_NUM_THREADS=ALL_CPUS
+    volumes:
+      - ${TILES_DIR:-../00/splitter/shared/data/tiles}:/data:ro
+    healthcheck:
+      # inside the container titiler listens on port 80
+      test: ["CMD", "curl", "-f", "http://localhost:80/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

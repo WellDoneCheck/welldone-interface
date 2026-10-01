@@ -65,7 +65,7 @@ function RenderResult({ visible }: { visible: boolean }) {
       }`}
     >
       <div className="absolute inset-0 overflow-hidden">
-        <Image src="/map/ground-photo.png" alt="立體模型（示意）" width={1137} height={640} className="h-full w-[177.68%] max-w-none" />
+        <Image src="/map/ground-photo.webp" unoptimized alt="立體模型（示意）" width={1137} height={640} className="h-full w-[177.68%] max-w-none" />
       </div>
       {/* mesh overlay: reads as a textured 3D model */}
       <svg className="pointer-events-none absolute inset-0 h-full w-full opacity-25 mix-blend-overlay" aria-hidden>

@@ -36,15 +36,12 @@ export default function StartButton() {
         href={UPLOAD_HREF}
         transitionTypes={TO_UPLOAD}
         onClick={onClick}
-        className="group flex h-[108px] w-[371px] items-center justify-between bg-[#62A4A7] pl-[60px] pr-[45px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.3)] outline-none transition-[filter] duration-300 hover:brightness-110 focus-visible:shadow-[0_0_0_4px_#D1E6E7]"
+        className="flex h-[108px] w-[371px] items-center justify-between bg-[#62A4A7] pl-[60px] pr-[45px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.3)] outline-none transition-[translate,filter] duration-500 ease-[var(--ease-expo)] hover:-translate-y-1.5 hover:brightness-110 motion-reduce:transition-none focus-visible:shadow-[0_0_0_4px_#D1E6E7]"
       >
         <span className="text-[48px] font-black leading-none tracking-[0.04em] text-white" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
           開始使用
         </span>
-        {/* the pin hops a little on hover */}
-        <span className="transition-transform duration-500 ease-[var(--ease-expo)] group-hover:-translate-y-1.5 motion-reduce:transition-none">
-          <PinArrow />
-        </span>
+        <PinArrow />
       </Link>
     </SharedTransition>
   );

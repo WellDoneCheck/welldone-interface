@@ -1,4 +1,4 @@
-import ComparePage from '../components/ComparePage';
+import CompareFromAddress from '../components/CompareFromAddress';
 
 export const metadata = {
   title: '合法水井比對 — SkyWell',
@@ -6,5 +6,5 @@ export const metadata = {
 };
 
 export default function CompareRoute() {
-  return <ComparePage />;
+  return <CompareFromAddress />;
 }

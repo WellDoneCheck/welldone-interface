@@ -148,10 +148,9 @@ body {
 }
 
 /* 地圖 ↔ 檢查頁的背景：以水井圖釘為中心推近／拉遠。
-   圖釘位置照地圖底圖（1958×1102，從左上角鋪滿視窗）上的百分比換算 */
+   --well-focus 是選取的圖釘尖端在畫面上的位置，由地圖頁隨地圖移動更新 */
 :root {
-  --map-image-width: max(100vw, calc(100vh * 1958 / 1102));
-  --well-focus: calc(var(--map-image-width) * 0.1956) calc(var(--map-image-width) * 0.145);
+  --well-focus: 50% 50%;
 }
 ::view-transition-group(.zoom-to-well),
 ::view-transition-group(.zoom-from-well) {
@@ -195,15 +194,22 @@ body {
   from { transform: scale(2.6); opacity: 0; }
 }
 
-/* 導覽列在換頁轉場時保持不動：自成一層、不淡入淡出，並疊在背景推近等全螢幕轉場之上 */
-::view-transition-group(site-navbar) {
+/* 導覽列與 AI 助理在換頁轉場時保持不動：各自成一層、不淡入淡出（直接顯示新頁上的樣子）
+   並疊在背景推近、拉頁、飛行中的卡片等轉場層之上，不會被蓋住消失 */
+::view-transition-group(site-navbar),
+::view-transition-group(copilot) {
   z-index: 50;
   animation: none;
 }
-::view-transition-old(site-navbar) {
+::view-transition-group(copilot) {
+  z-index: 55;
+}
+::view-transition-old(site-navbar),
+::view-transition-old(copilot) {
   display: none;
 }
-::view-transition-new(site-navbar) {
+::view-transition-new(site-navbar),
+::view-transition-new(copilot) {
   animation: none;
 }
 
@@ -230,8 +236,58 @@ body {
 ::view-transition-group(well-time),
 ::view-transition-group(export-entry),
 ::view-transition-group(compare-area),
-::view-transition-group(start-upload) {
+::view-transition-group(start-upload),
+::view-transition-group(recognition-accuracy) {
   z-index: 40;
+}
+
+/* 匯出卡片 → 檢查頁（React share 類別 export-card，只用在這個轉場）：卡片的照片與井號、座標、時間沿路飛到檢查頁的位置，
+   前段快、後段減速穩穩停住；舊內容先淡出、新內容隨後淡入，不疊出雙影，照片保持比例 */
+::view-transition-group(.export-card) {
+  animation-duration: 650ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+::view-transition-old(.export-card),
+::view-transition-new(.export-card) {
+  height: 100%;
+  object-fit: cover;
+  mix-blend-mode: normal;
+  animation-duration: 650ms;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+::view-transition-old(.export-card) {
+  animation-name: export-card-out;
+}
+::view-transition-new(.export-card) {
+  animation-name: export-card-in;
+}
+@keyframes export-card-out {
+  35%, 100% { opacity: 0; }
+}
+@keyframes export-card-in {
+  0%, 20% { opacity: 0; }
+  60%, 100% { opacity: 1; }
+}
+
+/* 同一個轉場裡，匯出頁（或匯出抽屜）慢慢淡出並微微後退，襯著飛出去的卡片，而不是一下子消失 */
+::view-transition-old(.export-page-out) {
+  animation: export-page-out 450ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes export-page-out {
+  to { opacity: 0; transform: scale(0.97); }
+}
+/* 從匯出抽屜出發時：抽屜先不透明地後退一點，遮住底下那頁換成新頁的交叉淡化（約 250ms），之後才淡出，不露出兩頁疊影；
+   疊在頁面部分之上、飛行中的卡片元素（40）之下 */
+::view-transition-group(export-sheet) {
+  z-index: 30;
+}
+::view-transition-old(export-sheet):only-child {
+  animation: export-sheet-out 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes export-sheet-out {
+  45% { opacity: 1; transform: scale(0.985); }
+  100% { opacity: 0; transform: scale(0.97); }
 }
 
 /* 按鈕拉大成另一頁的區塊：地圖的「合法井比對」↔ 比對頁的面板（回地圖時縮回按鈕）、主頁的「開始使用」→ 上傳頁的上傳面板。
@@ -278,6 +334,54 @@ body {
   100% { opacity: 1; }
 }
 
+/* 上傳頁的地圖紀錄 ↔ 地圖頁的地圖（React share 類別 upload-record，只用在開啟地圖與「返回上傳頁面」）：
+   外框從那一列放大成整個畫面（回來時縮回那一列），內容隨外框縮放並裁切填滿；舊的在中段淡出、新的接著淡入，
+   疊在背景與淡入淡出的各頁面部分之上 */
+::view-transition-group(.upload-record) {
+  z-index: 40;
+  animation-duration: 750ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+::view-transition-image-pair(.upload-record) {
+  overflow: clip;
+  box-shadow: 0 4px 20px 8px rgba(0, 0, 0, 0.35);
+}
+::view-transition-old(.upload-record),
+::view-transition-new(.upload-record) {
+  height: 100%;
+  object-fit: cover;
+  mix-blend-mode: normal;
+  animation-duration: 750ms;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+::view-transition-old(.upload-record) {
+  animation-name: upload-record-out;
+}
+::view-transition-new(.upload-record) {
+  animation-name: upload-record-in;
+}
+@keyframes upload-record-out {
+  0%, 20% { opacity: 1; }
+  55%, 100% { opacity: 0; }
+}
+@keyframes upload-record-in {
+  0%, 20% { opacity: 0; }
+  60%, 100% { opacity: 1; }
+}
+
+/* 從地圖頁「返回上傳頁面」回來時的清單（名稱 upload-records-back）：不滑入，原地直接淡入，
+   地圖縮回的那一列四周都已經就位；離場時跟其他頁面部分一樣淡出 */
+::view-transition-new(upload-records-back):only-child {
+  animation: records-fade-in 450ms ease-out 150ms both;
+}
+::view-transition-old(upload-records-back):only-child {
+  animation: page-part-out 260ms ease-in both;
+}
+@keyframes records-fade-in {
+  from { opacity: 0; }
+}
+
 /* 上傳頁的地圖清單：進場時從畫面右側滑入就位；離場時跟其他頁面部分一樣淡出 */
 ::view-transition-new(upload-records):only-child {
   animation: records-slide-in 750ms cubic-bezier(0.22, 1, 0.36, 1) 150ms both;
@@ -287,6 +391,14 @@ body {
 }
 @keyframes records-slide-in {
   from { transform: translateX(100vw); }
+}
+
+/* 監控頁：下次更新的倒數條由左而右填滿；新事件從上方滑入 */
+@keyframes monitor-countdown {
+  from { transform: scaleX(0); }
+}
+@keyframes monitor-event-in {
+  from { opacity: 0; transform: translateY(-10px); }
 }
 
 /* 載入動畫（WellLoader）：水井漣漪、中心呼吸、跳動的點 */

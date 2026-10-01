@@ -245,10 +245,11 @@ function EdgeTab({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => void }
 /* ─── Widget ────────────────────────────────────────────────────── */
 
 // AI copilot drawer shown on every page once logged in; only its tab shows while closed
-export default function CopilotWidget({ hidden = false }: { hidden?: boolean }) {
+export default function CopilotWidget() {
   const [isOpen, setIsOpen] = useState(false);
   const { messages, typing, send } = useCopilotChat();
-  const scale = useFitScale(STAGE);
+  // the whole window, scrollbar included: the tab keeps its size on pages with and without a scrollbar
+  const scale = useFitScale(STAGE, true);
   const inputRef = useRef<HTMLInputElement>(null);
   const drawerRef = useRef<HTMLDivElement>(null);
 
@@ -277,10 +278,10 @@ export default function CopilotWidget({ hidden = false }: { hidden?: boolean }) 
 
   return (
     <div
-      inert={hidden}
       onKeyDown={onKeyDown}
-      // Only the tab and the drawer take clicks: the wrapper spans the full height, even while the drawer is away
-      className={`pointer-events-none fixed right-0 top-0 z-[55] transition-opacity duration-500 ${MOTION} ${hidden ? 'opacity-0' : 'opacity-100'}`}
+      // Only the tab and the drawer take clicks: the wrapper spans the full height, even while the drawer is away.
+      // Its own layer on page changes, kept still above everything like the navbar (globals.css).
+      className="pointer-events-none fixed right-0 top-0 z-[55] [view-transition-name:copilot]"
     >
       <div
         ref={drawerRef}

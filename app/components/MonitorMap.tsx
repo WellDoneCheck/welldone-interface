@@ -1,28 +1,37 @@
 'use client';
 
 import { useState, type ReactNode } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
-import { STATUS_META, WELL_TOTALS, type WellMarker, type WellStatus } from '../data/monitor';
+import type { Map as MapLibreMap } from 'maplibre-gl';
+import TileMap, { useMapProject, type Bounds } from './TileMap';
+import { STATUS_META, type WellMarker, type WellStatus } from '../data/monitor';
+import { IMAGERY_BOUNDS } from '../data/xizhouImagery';
 
-const SERIF = { fontFamily: 'var(--font-noto-serif-tc), serif' };
+// the dark control panels over the map, as on the rest of the monitor page (no backdrop blur: over a map being dragged
+// it would be worked out again on every frame)
+const OVERLAY = 'border border-white/[0.1] bg-[#141917]/[0.94]';
 
-const ZOOM_MIN = 1;
-const ZOOM_MAX = 2.5;
-const ZOOM_STEP = 0.25;
+// The whole strip, clear of the filter tabs above and the selected well's panel below (in the panel's own pixels)
+const PANEL_FIT = { bounds: IMAGERY_BOUNDS as Bounds, padding: { top: 70, bottom: 190, left: 24, right: 64 } };
+// Zooming in stops at a single well's surroundings
+const ZOOM_IN_LIMIT = 21;
 
 interface MonitorMapProps {
   markers: WellMarker[];
+  // wells per status, for the filter counts
+  totals: Record<WellStatus, number>;
   // Only wells with this status are shown; null shows all
   filter: WellStatus | null;
   onFilterChange: (filter: WellStatus | null) => void;
   selectedId: string;
   onSelect: (recordId: string) => void;
+  // the page's layout scale (CSS zoom): the map inside undoes it, as MapLibre needs its pointer and size in real pixels
+  scale: number;
 }
 
 /* ─── Marker ────────────────────────────────────────────────────── */
 
-function MarkerDot({ marker, selected, zoom, onSelect }: { marker: WellMarker; selected: boolean; zoom: number; onSelect: () => void }) {
+function MarkerDot({ marker, position, selected, onSelect }: { marker: WellMarker; position: { x: number; y: number }; selected: boolean; onSelect: () => void }) {
   const meta = STATUS_META[marker.status];
 
   return (
@@ -31,11 +40,15 @@ function MarkerDot({ marker, selected, zoom, onSelect }: { marker: WellMarker; s
       aria-label={`${marker.recordId}，${meta.label}`}
       aria-pressed={selected}
       onClick={onSelect}
-      className="group absolute z-10 flex h-8 w-8 items-center justify-center outline-none"
-      style={{ left: `${marker.x}%`, top: `${marker.y}%`, transform: `translate(-50%, -50%) scale(${1 / zoom})` }}
+      className="group pointer-events-auto absolute z-10 flex h-8 w-8 -translate-x-1/2 -translate-y-1/2 items-center justify-center outline-none"
+      style={{ left: position.x, top: position.y }}
     >
+      {/* wells still to be checked pulse, to draw the eye */}
+      {marker.status === 'pending' && !selected && (
+        <span className={`absolute h-3.5 w-3.5 animate-ping opacity-60 motion-reduce:animate-none ${meta.dot}`} style={{ transform: 'rotate(45deg)' }} />
+      )}
       <span
-        className={`block border-2 border-white transition-all duration-300 group-hover:scale-125 group-focus-visible:shadow-[0_0_0_3px_#F7F6F1] ${meta.dot} ${
+        className={`relative block border-2 border-white transition-all duration-300 group-hover:scale-125 group-focus-visible:shadow-[0_0_0_3px_#F7F6F1] ${meta.dot} ${
           selected ? 'h-5 w-5 shadow-[0_0_0_4px_rgba(255,255,255,0.55)]' : 'h-3.5 w-3.5'
         }`}
         style={{ transform: 'rotate(45deg)' }}
@@ -46,15 +59,21 @@ function MarkerDot({ marker, selected, zoom, onSelect }: { marker: WellMarker; s
 
 /* ─── Filter tabs ───────────────────────────────────────────────── */
 
-function StatusFilter({ filter, onChange }: { filter: WellStatus | null; onChange: (filter: WellStatus | null) => void }) {
-  const total = Object.values(WELL_TOTALS).reduce((sum, count) => sum + count, 0);
+interface StatusFilterProps {
+  totals: Record<WellStatus, number>;
+  filter: WellStatus | null;
+  onChange: (filter: WellStatus | null) => void;
+}
+
+function StatusFilter({ totals, filter, onChange }: StatusFilterProps) {
+  const total = Object.values(totals).reduce((sum, count) => sum + count, 0);
   const tabs: { key: WellStatus | null; label: string; count: number }[] = [
     { key: null, label: '全部', count: total },
-    ...(Object.keys(STATUS_META) as WellStatus[]).map((status) => ({ key: status, label: STATUS_META[status].label, count: WELL_TOTALS[status] })),
+    ...(Object.keys(STATUS_META) as WellStatus[]).map((status) => ({ key: status, label: STATUS_META[status].label, count: totals[status] })),
   ];
 
   return (
-    <div role="group" aria-label="依辨識狀態篩選" className="flex border-2 border-[#3F7A7E] bg-white">
+    <div role="group" aria-label="依辨識狀態篩選" className={`flex ${OVERLAY}`}>
       {tabs.map((tab) => {
         const active = filter === tab.key;
         return (
@@ -64,12 +83,12 @@ function StatusFilter({ filter, onChange }: { filter: WellStatus | null; onChang
             aria-pressed={active}
             onClick={() => onChange(tab.key)}
             className={`flex items-center gap-1.5 px-3 py-2 text-sm transition-colors duration-300 ${
-              active ? 'bg-[#3F7A7E] font-bold text-white' : 'text-[#2C322F] hover:bg-[#D1E6E7]'
+              active ? 'bg-[#62A4A7]/25 font-bold text-[#F2F1EC]' : 'text-[#F2F1EC]/75 hover:bg-white/10 hover:text-[#F2F1EC]'
             }`}
           >
             {tab.key && <span className={`h-2 w-2 ${STATUS_META[tab.key].dot}`} style={{ transform: 'rotate(45deg)' }} />}
             {tab.label}
-            <span className={`text-xs tabular-nums ${active ? 'text-white/70' : 'text-[#6F7468]'}`}>{tab.count.toLocaleString()}</span>
+            <span className="text-xs tabular-nums text-[#F2F1EC]/50">{tab.count.toLocaleString()}</span>
           </button>
         );
       })}
@@ -83,22 +102,21 @@ function SelectedWell({ marker }: { marker: WellMarker }) {
   const meta = STATUS_META[marker.status];
 
   return (
-    <div className="absolute inset-x-4 bottom-4 z-20 flex items-end justify-between gap-4 border-2 border-[#3F7A7E] bg-white p-4 shadow-[0_4px_2px_rgba(44,50,47,0.05)]">
+    <div className={`absolute inset-x-4 bottom-4 z-20 flex items-end justify-between gap-4 p-4 ${OVERLAY}`}>
       <div className="min-w-0">
-        <p className="text-xs font-bold tracking-[0.05em] text-[#6F7468]">已選水井</p>
-        <p className="mt-1 text-2xl font-bold text-[#2C322F]" style={SERIF}>
-          {marker.recordId}
-        </p>
-        <div className="mt-2 flex items-center gap-3 text-sm text-[#6F7468]">
-          <span className={`px-2 py-0.5 text-xs font-bold ${meta.badge}`}>{meta.label}</span>
+        <p className="text-xs font-bold tracking-[0.05em] text-[#F2F1EC]/50">已選水井</p>
+        <p className="mt-1 text-2xl font-semibold text-[#F2F1EC]">{marker.recordId}</p>
+        <div className="mt-2 flex items-center gap-3 text-sm text-[#F2F1EC]/60">
+          <span className="inline-flex items-center gap-1.5 text-[#F2F1EC]">
+            <span className={`h-2 w-2 ${meta.dot}`} style={{ transform: 'rotate(45deg)' }} />
+            {meta.label}
+          </span>
           {marker.coordinates}
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
-        <p className="text-4xl font-bold leading-none text-[#3F7A7E]" style={SERIF}>
-          {marker.confidence}%
-        </p>
-        <p className="text-xs text-[#6F7468]">辨識信賴度</p>
+        <p className="text-4xl font-semibold leading-none text-[#F2F1EC]">{marker.confidence}%</p>
+        <p className="text-xs text-[#F2F1EC]/50">辨識信賴度</p>
         <Link
           href={`/check?record=${marker.recordId}`}
           className="mt-1 bg-[#62A4A7] px-4 py-2 text-sm font-bold text-white transition-colors duration-300 hover:bg-[#54999D]"
@@ -119,7 +137,7 @@ function ControlButton({ label, disabled, onClick, children }: { label: string; 
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
-      className="flex h-10 w-10 items-center justify-center border-2 border-[#3F7A7E] bg-white text-[#2C322F] transition-colors duration-300 hover:bg-[#D1E6E7] active:scale-95 disabled:opacity-40"
+      className={`flex h-10 w-10 items-center justify-center text-[#F2F1EC] transition-colors duration-300 hover:bg-white/10 active:scale-95 disabled:opacity-40 ${OVERLAY}`}
     >
       {children}
     </button>
@@ -128,41 +146,55 @@ function ControlButton({ label, disabled, onClick, children }: { label: string; 
 
 /* ─── Map ───────────────────────────────────────────────────────── */
 
-// Stand-in for the map: the titiler tile layer will replace the photo. Markers are placed in % of the view.
-export default function MonitorMap({ markers, filter, onFilterChange, selectedId, onSelect }: MonitorMapProps) {
-  const [zoom, setZoom] = useState(ZOOM_MIN);
+// Zoom in, back to the whole strip, zoom out; follows the map's zoom to know when a button can no longer be used
+function ZoomControls({ map, fit }: { map: MapLibreMap | null; fit: { bounds: Bounds; padding: { top: number; bottom: number; left: number; right: number } } }) {
+  useMapProject(map);
+  return (
+    <div className="absolute right-3 top-3 z-20 flex flex-col gap-2">
+      <ControlButton label="放大" disabled={!map || map.getZoom() >= ZOOM_IN_LIMIT} onClick={() => map?.zoomIn()}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
+      </ControlButton>
+      <ControlButton label="回到整條航線" disabled={!map} onClick={() => map?.fitBounds(fit.bounds, { padding: fit.padding })}>
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><circle cx="9" cy="9" r="3" /><path d="M9 1.5v3M9 13.5v3M1.5 9h3M13.5 9h3" /></svg>
+      </ControlButton>
+      <ControlButton label="縮小" disabled={!map || map.getZoom() <= map.getMinZoom()} onClick={() => map?.zoomOut()}>
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M3 8h10" /></svg>
+      </ControlButton>
+    </div>
+  );
+}
+
+// The survey map (tiles from titiler), dragged and zoomed inside the panel, with a marker on every well
+export default function MonitorMap({ markers, totals, filter, onFilterChange, selectedId, onSelect, scale }: MonitorMapProps) {
+  const [map, setMap] = useState<MapLibreMap | null>(null);
   const selected = markers.find((marker) => marker.recordId === selectedId) ?? markers[0];
   const shown = markers.filter((marker) => filter === null || marker.status === filter);
-
-  const changeZoom = (delta: number) => setZoom((current) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, current + delta)));
+  const { top, bottom, left, right } = PANEL_FIT.padding;
+  const fit = { bounds: PANEL_FIT.bounds, padding: { top: top * scale, bottom: bottom * scale, left: left * scale, right: right * scale } };
 
   return (
-    <section aria-label="水井地圖" className="relative h-[848px] w-[630px] shrink-0 overflow-hidden border-[3px] border-[#3F7A7E] bg-[#2C322F]">
-      <div
-        className="absolute inset-0 transition-transform duration-500 ease-[var(--ease-expo)] motion-reduce:transition-none"
-        style={{ transform: `scale(${zoom})` }}
-      >
-        <Image src="/aerial-bg.png" alt="" fill sizes="630px" className="object-cover object-[30%_center] [filter:saturate(0.8)_brightness(0.7)]" />
-        {shown.map((marker) => (
-          <MarkerDot key={marker.recordId} marker={marker} selected={marker.recordId === selected.recordId} zoom={zoom} onSelect={() => onSelect(marker.recordId)} />
-        ))}
+    <section aria-label="水井地圖" className="relative h-full w-[628px] shrink-0 overflow-hidden border border-white/[0.08] bg-[#141917]">
+      <div className="absolute inset-0" style={{ zoom: 1 / scale }}>
+        <TileMap fit={fit} interactive muted onReady={setMap}>
+          {({ project }) =>
+            shown.map((marker) => (
+              <MarkerDot
+                key={marker.recordId}
+                marker={marker}
+                position={project(marker)}
+                selected={marker.recordId === selected.recordId}
+                onSelect={() => onSelect(marker.recordId)}
+              />
+            ))
+          }
+        </TileMap>
       </div>
 
       <div className="absolute left-3 top-3 z-20">
-        <StatusFilter filter={filter} onChange={onFilterChange} />
+        <StatusFilter totals={totals} filter={filter} onChange={onFilterChange} />
       </div>
 
-      <div className="absolute right-3 top-3 z-20 flex flex-col gap-2">
-        <ControlButton label="放大" disabled={zoom >= ZOOM_MAX} onClick={() => changeZoom(ZOOM_STEP)}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M8 3v10M3 8h10" /></svg>
-        </ControlButton>
-        <ControlButton label="回到預設縮放" onClick={() => setZoom(ZOOM_MIN)}>
-          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><circle cx="9" cy="9" r="3" /><path d="M9 1.5v3M9 13.5v3M1.5 9h3M13.5 9h3" /></svg>
-        </ControlButton>
-        <ControlButton label="縮小" disabled={zoom <= ZOOM_MIN} onClick={() => changeZoom(-ZOOM_STEP)}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="M3 8h10" /></svg>
-        </ControlButton>
-      </div>
+      <ZoomControls map={map} fit={fit} />
 
       <SelectedWell marker={selected} />
     </section>

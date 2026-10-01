@@ -92,7 +92,7 @@ export default function StatusPage({ kind, code, title, description, actions, fo
   const { accent } = STATUS_STYLES[kind];
   return (
     <main className="relative min-h-screen overflow-hidden bg-[#2C322F] text-[#F7F6F1]" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
-      <Image src="/aerial-bg.png" alt="" fill priority sizes="100vw" className="object-cover" />
+      <Image src="/aerial-bg.webp" unoptimized alt="" fill priority sizes="100vw" className="object-cover" />
       <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(24,28,26,0.92)_0%,rgba(24,28,26,0.72)_45%,rgba(24,28,26,0.35)_100%)]" />
 
       <Radar kind={kind} />

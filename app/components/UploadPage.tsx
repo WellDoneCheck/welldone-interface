@@ -4,9 +4,20 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { YEAR_GROUPS, type RecordItem, type RecordStatus } from '../data/mapRecords';
+import { recordName, renameRecord } from '../utils/recordNames';
+import { useRecordNames } from './RecordName';
 import { useFitScale, type FitStage } from './useFitScale';
-import MapPhoto from './MapPhoto';
-import SharedTransition, { ONLY_TO_UPLOAD, PageBackgroundTransition, SHARED, pagePart } from './SharedTransition';
+import SharedTransition, {
+  ONLY_TO_UPLOAD,
+  OPEN_MAP,
+  PageBackgroundTransition,
+  SHARED,
+  UPLOAD_RECORD_SHARE,
+  clearBackToUpload,
+  isBackToUpload,
+  pagePart,
+  uploadRecordName,
+} from './SharedTransition';
 import { CONTENT_TOP, FRAME_MARGIN_X, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, useViewportSize } from './pageFrame';
 
 // Figma stage: two panels (654 + 51 + 1079) by 869 tall, scaled to fit the content area lined up with the navbar.
@@ -55,44 +66,48 @@ function RecordRow({ record, name }: { record: RecordItem; name: string }) {
   return (
     <Link
       href={`/map?record=${record.id}`}
+      transitionTypes={OPEN_MAP}
       aria-label={`檢視 ${name} 的地圖`}
       className="group/row block outline-none"
     >
-      {/* only the card lifts on hover; the link stays put so its clickable area never slips from under the pointer */}
-      <div className="relative flex h-[93.24px] w-full flex-col justify-center overflow-clip drop-shadow-[8px_8px_10px_rgba(0,0,0,0.25)] transition-transform duration-300 ease-out group-hover/row:-translate-y-1">
-        <div className="absolute inset-[0_0_0.24px_0] overflow-clip">
-          <div className="absolute inset-[0_0_-18.49%_0] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)]">
-            <div className="absolute inset-0 overflow-hidden">
-              <div className="absolute left-[0.09%] top-[-766.25%] h-[868.58%] w-full">
-                <Image src="/upload/record-bg.png" alt="" fill sizes="995px" className="object-fill" />
+      {/* only the card lifts on hover; the link stays put so its clickable area never slips from under the pointer.
+          Opening the map, the card grows into it (and the map shrinks back into it coming back) */}
+      <SharedTransition name={uploadRecordName(record.id)} share={UPLOAD_RECORD_SHARE}>
+        <div className="relative flex h-[93.24px] w-full flex-col justify-center overflow-clip drop-shadow-[8px_8px_10px_rgba(0,0,0,0.25)] transition-transform duration-300 ease-out group-hover/row:-translate-y-1">
+          <div className="absolute inset-[0_0_0.24px_0] overflow-clip">
+            <div className="absolute inset-[0_0_-18.49%_0] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)]">
+              <div className="absolute inset-0 overflow-hidden">
+                <div className="absolute left-[0.09%] top-[-766.25%] h-[868.58%] w-full">
+                  <Image src="/upload/record-bg.webp" unoptimized alt="" fill sizes="995px" className="object-fill" />
+                </div>
+              </div>
+              <div className="absolute inset-0 bg-white/20" />
+            </div>
+          </div>
+          <div className="absolute inset-[0_0_0.24px_0] bg-[linear-gradient(90deg,rgba(0,0,0,0.75)_0%,rgba(0,0,0,0.40)_50%,rgba(0,0,0,0.70)_100%)]" />
+
+          <div className="relative flex flex-1 items-center justify-between px-4">
+            <div className="flex min-w-[137px] flex-col items-start gap-1">
+              <div className="text-2xl font-medium leading-5 tracking-[-0.35px] text-white">{name}</div>
+              <div className="text-xs leading-4 text-white/70">{record.timestamp}</div>
+            </div>
+
+            <div className="flex flex-col items-end gap-1">
+              <div className="text-base leading-4 text-white/70">
+                ({record.current}/{record.total})
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${styles.dot}`} />
+                <span className="text-xl leading-5 text-white">{record.statusLabel}</span>
               </div>
             </div>
-            <div className="absolute inset-0 bg-white/20" />
-          </div>
-        </div>
-        <div className="absolute inset-[0_0_0.24px_0] bg-[linear-gradient(90deg,rgba(0,0,0,0.75)_0%,rgba(0,0,0,0.40)_50%,rgba(0,0,0,0.70)_100%)]" />
-
-        <div className="relative flex flex-1 items-center justify-between px-4">
-          <div className="flex min-w-[137px] flex-col items-start gap-1">
-            <div className="text-2xl font-medium leading-5 tracking-[-0.35px] text-white">{name}</div>
-            <div className="text-xs leading-4 text-white/70">{record.timestamp}</div>
           </div>
 
-          <div className="flex flex-col items-end gap-1">
-            <div className="text-base leading-4 text-white/70">
-              ({record.current}/{record.total})
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${styles.dot}`} />
-              <span className="text-xl leading-5 text-white">{record.statusLabel}</span>
-            </div>
+          <div className="relative h-1 w-full bg-white/10">
+            <div className={`h-full ${styles.bar}`} style={{ width: `${record.progress}%` }} />
           </div>
         </div>
-
-        <div className="relative h-1 w-full bg-white/10">
-          <div className={`h-full ${styles.bar}`} style={{ width: `${record.progress}%` }} />
-        </div>
-      </div>
+      </SharedTransition>
     </Link>
   );
 }
@@ -193,7 +208,7 @@ function RecordTray({ record, name, mode, onModeChange, onRename, onDelete }: Re
 
   return (
     <div className="flex flex-1 items-center gap-1">
-      <Link href={`/map?record=${record.id}`} className={`${TRAY_BUTTON} text-white/85 hover:bg-white/10 hover:text-white`}>
+      <Link href={`/map?record=${record.id}`} transitionTypes={OPEN_MAP} className={`${TRAY_BUTTON} text-white/85 hover:bg-white/10 hover:text-white`}>
         <MapIcon />
         開啟地圖
       </Link>
@@ -303,6 +318,10 @@ function FileRow({ file, index, onRemove }: { file: UploadFile; index: number; o
 /* ─── Component ─────────────────────────────────────────────────── */
 
 export default function UploadPage() {
+  // arrived by the map page's link back: the record list fades in instead of sliding in (read once as the page
+  // arrives; React may run this twice while developing, so the flag is cleared in an effect, not here)
+  const [backFromMap] = useState(isBackToUpload);
+  useEffect(() => clearBackToUpload(), []);
   const scale = useFitScale(UPLOAD_STAGE);
   const viewport = useViewportSize();
   const framed = viewport.width >= UPLOAD_STAGE.minViewportWidth;
@@ -321,7 +340,8 @@ export default function UploadPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   // Local edits to the placeholder records until they are saved to the backend
-  const [recordNames, setRecordNames] = useState<Record<string, string>>({});
+  // shared with the map, check and compare pages, which can rename the files too
+  const recordNames = useRecordNames();
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -420,7 +440,7 @@ export default function UploadPage() {
 
   const totalSize = files.reduce((s, f) => s + f.size, 0);
 
-  const nameOf = (record: RecordItem) => recordNames[record.id] ?? record.id;
+  const nameOf = (record: RecordItem) => recordName(record, recordNames);
 
   const visibleGroups = YEAR_GROUPS
     .map((group) => ({
@@ -444,10 +464,12 @@ export default function UploadPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
-      {/* ═══ Background aerial photo: the same map as the map page, so opening a record keeps it still ═══ */}
+      {/* ═══ Background: the aerial photo, covering the window from its top-left corner ═══ */}
       <PageBackgroundTransition>
         <div className="fixed inset-0 z-0 overflow-hidden">
-          <MapPhoto />
+          <div className="absolute left-0 top-0 aspect-[1958/1102] w-[max(100vw,calc(100dvh*1958/1102))]">
+            <Image src="/aerial-bg.png" alt="" fill priority sizes="100vw" className="object-cover" />
+          </div>
         </div>
       </PageBackgroundTransition>
 
@@ -534,10 +556,11 @@ export default function UploadPage() {
             </div>
           </SharedTransition>
 
-          {/* ── RIGHT PANEL — Processing Status (its own layer on page changes: slides in from the right, see globals.css) ── */}
+          {/* ── RIGHT PANEL — Processing Status (its own layer on page changes: slides in from the right, or fades in when
+              back from the map, see globals.css) ── */}
           <div
             className="flex h-[560px] xl:h-full w-full max-w-[1079px] xl:min-w-0 xl:max-w-none xl:flex-1 flex-col bg-white shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]"
-            style={{ viewTransitionName: 'upload-records' }}
+            style={{ viewTransitionName: backFromMap ? 'upload-records-back' : 'upload-records' }}
           >
             {/* Header with icons */}
             <div className="flex items-start justify-between pl-[46px] pr-[57px] pt-10">
@@ -641,7 +664,7 @@ export default function UploadPage() {
                         key={record.id}
                         record={record}
                         name={nameOf(record)}
-                        onRename={(name) => setRecordNames((current) => ({ ...current, [record.id]: name }))}
+                        onRename={(name) => renameRecord(record.id, name)}
                         onDelete={() => setDeletedIds((current) => new Set(current).add(record.id))}
                       />
                     ))}

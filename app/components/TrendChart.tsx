@@ -45,16 +45,17 @@ export default function TrendChart({ data, target, firstDay }: TrendChartProps) 
       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="block w-full" role="img" aria-label={`近 30 天每日驗證數，目標 ${target}`}>
         <defs>
           <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#62A4A7" stopOpacity="0.28" />
+            <stop offset="0%" stopColor="#62A4A7" stopOpacity="0.18" />
             <stop offset="100%" stopColor="#62A4A7" stopOpacity="0" />
           </linearGradient>
         </defs>
 
-        <line x1={PAD.left} x2={WIDTH - PAD.right} y1={yAt(0)} y2={yAt(0)} stroke="#2C322F" strokeOpacity="0.15" />
-        <line x1={PAD.left} x2={WIDTH - PAD.right} y1={yAt(target)} y2={yAt(target)} stroke="#8A611C" strokeOpacity="0.7" strokeDasharray="4 4" />
+        <line x1={PAD.left} x2={WIDTH - PAD.right} y1={yAt(0)} y2={yAt(0)} stroke="#F2F1EC" strokeOpacity="0.14" />
+        {/* the daily target: dashed, as a threshold rather than a gridline */}
+        <line x1={PAD.left} x2={WIDTH - PAD.right} y1={yAt(target)} y2={yAt(target)} stroke="#F2F1EC" strokeOpacity="0.5" strokeDasharray="4 4" />
 
         <path d={area} fill="url(#trend-fill)" />
-        <path d={line} fill="none" stroke="#3F7A7E" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+        <path d={line} fill="none" stroke="#62A4A7" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
 
         {data.map((_, index) =>
           index % X_LABEL_STEP === 0 || index === data.length - 1 ? (
@@ -63,7 +64,8 @@ export default function TrendChart({ data, target, firstDay }: TrendChartProps) 
               x={xAt(index, data.length)}
               y={HEIGHT - 5}
               fontSize="10"
-              fill="#6F7468"
+              fill="#F2F1EC"
+              fillOpacity="0.45"
               textAnchor={index === 0 ? 'start' : index === data.length - 1 ? 'end' : 'middle'}
             >
               {dayLabel(firstDay, index)}
@@ -73,15 +75,15 @@ export default function TrendChart({ data, target, firstDay }: TrendChartProps) 
 
         {hovered !== null && (
           <g>
-            <line x1={xAt(hovered, data.length)} x2={xAt(hovered, data.length)} y1={PAD.top} y2={yAt(0)} stroke="#2C322F" strokeOpacity="0.3" />
-            <circle cx={xAt(hovered, data.length)} cy={yAt(data[hovered])} r="4" fill="white" stroke="#3F7A7E" strokeWidth="2" />
+            <line x1={xAt(hovered, data.length)} x2={xAt(hovered, data.length)} y1={PAD.top} y2={yAt(0)} stroke="#F2F1EC" strokeOpacity="0.3" />
+            <circle cx={xAt(hovered, data.length)} cy={yAt(data[hovered])} r="4" fill="#62A4A7" stroke="#141917" strokeWidth="2" />
           </g>
         )}
       </svg>
 
       {hovered !== null && (
         <div
-          className="pointer-events-none absolute -translate-x-1/2 -translate-y-full whitespace-nowrap bg-[#2C322F] px-2 py-1 text-xs font-bold text-[#F7F6F1]"
+          className="pointer-events-none absolute -translate-x-1/2 -translate-y-full whitespace-nowrap border border-white/10 bg-[#0E1211] px-2 py-1 text-xs font-bold text-[#F2F1EC]"
           style={{
             left: `${(xAt(hovered, data.length) / WIDTH) * 100}%`,
             top: `${(yAt(data[hovered]) / HEIGHT) * 100}%`,

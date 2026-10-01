@@ -1,13 +1,16 @@
 'use client';
 
-import { useMemo, useState, type ChangeEvent, type DragEvent } from 'react';
+import { useEffect, useMemo, useState, type ChangeEvent, type DragEvent } from 'react';
 import { useFitScale, type FitStage } from './useFitScale';
 import ExportEntry from './ExportEntry';
-import MapPhoto, { MapShade } from './MapPhoto';
+import type { GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
+import TileMap, { MapShade, drawIcon, iconAt, pointFeatures, useIconLayer, useMapLayer, type Bounds as GeoBounds, type Icon } from './TileMap';
 import BackToMapLink, { BACK_LINK_HEIGHT } from './BackToMapLink';
+import CursorCoordinates from './CursorCoordinates';
 import SharedTransition, { PageBackgroundTransition, SHARED, pagePart } from './SharedTransition';
 import { CONTENT_TOP, PAGE_GAP, PAGE_GUTTER, useViewportSize, type ViewportSize } from './pageFrame';
 import { EXPORT_WELLS } from '../data/exportWells';
+import type { RecordItem } from '../data/mapRecords';
 import { decodeCsv, downloadCsv } from '../utils/csv';
 import { parseLegalWellsCsv } from '../utils/legalWellsCsv';
 import { buildComparisonCsv, compareWells, type GeoPoint, type WellComparison } from '../utils/wellComparison';
@@ -73,6 +76,120 @@ const MARKER_STYLES: Record<Category | 'detected', string> = {
   detected: 'h-[22px] w-[22px] border-[3px] border-[#62A4A7] bg-white/85',
 };
 
+/* ─── Markers drawn by the map ──────────────────────────────────── */
+
+// Every marker but the selected one (a page element) is an icon the map draws itself, so a hundred of them move and
+// scale with it at no cost. The icons are drawn once, looking as MARKER_STYLES does on the page.
+const MARKER_LAYER = 'compare-markers';
+// Room for the largest look: the unregistered marker with its dashed halo (14px outside it) and a shadow
+const MARKER_ICON_SIDE = 72;
+
+interface MarkerLook {
+  diameter: number;
+  ring: string;
+  fill: string;
+  dashed?: boolean;
+}
+
+const MARKER_LOOKS: Record<Category | 'detected', MarkerLook> = {
+  matched: { diameter: 24, ring: '#FFFFFF', fill: '#62A4A7' },
+  unregistered: { diameter: 28, ring: '#FFFFFF', fill: '#BC5646' },
+  missing: { diameter: 24, ring: '#D9A441', fill: 'rgba(248, 235, 209, 0.5)', dashed: true },
+  detected: { diameter: 22, ring: '#62A4A7', fill: 'rgba(255, 255, 255, 0.85)' },
+};
+
+// A filled circle with a 3px ring inside its edge and a soft shadow; halo: the unregistered marker's dashed ring around
+function drawMarker({ diameter, ring, fill, dashed }: MarkerLook, halo: boolean): Icon {
+  return drawIcon(MARKER_ICON_SIDE, (context) => {
+    const centre = MARKER_ICON_SIDE / 2;
+    const circle = (radius: number) => {
+      context.beginPath();
+      context.arc(centre, centre, radius, 0, 2 * Math.PI);
+    };
+    if (halo) {
+      circle(diameter / 2 + 14);
+      context.fillStyle = 'rgba(188, 86, 70, 0.1)';
+      context.fill();
+      context.setLineDash([4, 3]);
+      context.lineWidth = 1.5;
+      context.strokeStyle = 'rgba(188, 86, 70, 0.7)';
+      context.stroke();
+    }
+    context.save();
+    context.shadowColor = 'rgba(0, 0, 0, 0.35)';
+    context.shadowBlur = 6;
+    context.shadowOffsetY = 2;
+    circle(diameter / 2);
+    context.fillStyle = fill;
+    context.fill();
+    context.restore();
+    circle(diameter / 2 - 1.5);
+    context.setLineDash(dashed ? [4, 3] : []);
+    context.lineWidth = 3;
+    context.strokeStyle = ring;
+    context.stroke();
+  });
+}
+
+const markerIcon = (look: Category | 'detected') => `compare-${look}`;
+const HALO_ICON = 'compare-unregistered-halo';
+
+async function markerIcons(): Promise<Record<string, Icon>> {
+  const looks = Object.entries(MARKER_LOOKS).map(([name, look]) => [markerIcon(name as Category | 'detected'), drawMarker(look, false)]);
+  return { ...Object.fromEntries(looks), [HALO_ICON]: drawMarker(MARKER_LOOKS.unregistered, true) };
+}
+
+// The markers as the map's icon layer: the compared wells (those of the chosen category in full, the rest faded, the
+// unregistered with their halo while they are the ones shown), or before a register is uploaded what the AI detected
+function useMarkerLayer(map: MapLibreMap | null, items: CompareItem[] | null, filter: Category, selectedKey: string | null, scale: number) {
+  const ready = useIconLayer(map, MARKER_LAYER, markerIcons, { 'icon-image': markerIcon('detected'), 'symbol-sort-key': ['get', 'order'] });
+
+  useEffect(() => {
+    if (!ready || !map) return;
+    // detected wells have no key: they are not picked by clicking
+    const features = items
+      ? pointFeatures(
+          items.map((item) => ({ ...item.point, item })),
+          ({ item }, order) => ({ key: item.key, category: item.category, order }),
+        )
+      : pointFeatures(DETECTED_WELLS, (_, order) => ({ category: 'detected', order }));
+    (map.getSource(MARKER_LAYER) as GeoJSONSource).setData(features);
+  }, [ready, map, items]);
+
+  useEffect(() => {
+    if (!ready || !map) return;
+    map.setLayoutProperty(MARKER_LAYER, 'icon-image', [
+      'case',
+      ['all', ['==', ['get', 'category'], 'unregistered'], ['literal', filter === 'unregistered']],
+      HALO_ICON,
+      ['concat', 'compare-', ['get', 'category']],
+    ]);
+    map.setPaintProperty(MARKER_LAYER, 'icon-opacity', ['case', ['in', ['get', 'category'], ['literal', [filter, 'detected']]], 1, 0.3]);
+  }, [ready, map, filter]);
+
+  useEffect(() => {
+    if (ready && map) map.setFilter(MARKER_LAYER, ['!=', ['get', 'key'], selectedKey ?? '']);
+  }, [ready, map, selectedKey]);
+
+  useEffect(() => {
+    if (ready && map) map.setLayoutProperty(MARKER_LAYER, 'icon-size', scale);
+  }, [ready, map, scale]);
+
+  // a pointer over a marker that can be picked
+  useEffect(() => {
+    if (!ready || !map || !items) return;
+    const enter = () => (map.getCanvas().style.cursor = 'pointer');
+    const leave = () => (map.getCanvas().style.cursor = '');
+    map.on('mouseenter', MARKER_LAYER, enter);
+    map.on('mouseleave', MARKER_LAYER, leave);
+    return () => {
+      map.off('mouseenter', MARKER_LAYER, enter);
+      map.off('mouseleave', MARKER_LAYER, leave);
+      leave();
+    };
+  }, [ready, map, items]);
+}
+
 /* ─── Results as map/list items ─────────────────────────────────── */
 
 interface CompareItem {
@@ -116,13 +233,6 @@ function counterpartText(item: CompareItem): string {
 
 /* ─── Map projection ────────────────────────────────────────────── */
 
-interface Area {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
 // Where things go on the stage, in stage pixels: the window's size and the navbar-aligned edges divided by the scale
 function stageLayout(scale: number, viewport: ViewportSize) {
   const width = viewport.width / scale;
@@ -144,33 +254,17 @@ function stageLayout(scale: number, viewport: ViewportSize) {
   };
 }
 
-// Fits the points into the map area, keeping east–west and north–south distances in proportion
-function makeProjection(points: GeoPoint[], area: Area) {
-  const latitudes = points.map((p) => p.latitude);
-  const longitudes = points.map((p) => p.longitude);
-  const [minLat, maxLat] = [Math.min(...latitudes), Math.max(...latitudes)];
-  const [minLng, maxLng] = [Math.min(...longitudes), Math.max(...longitudes)];
-  const eastWest = Math.cos((((minLat + maxLat) / 2) * Math.PI) / 180);
-  const spanX = Math.max((maxLng - minLng) * eastWest, 1e-9);
-  const spanY = Math.max(maxLat - minLat, 1e-9);
-  const pxPerDegree = Math.min(area.width / spanX, area.height / spanY);
-  const offsetX = area.left + (area.width - spanX * pxPerDegree) / 2;
-  const offsetY = area.top + (area.height - spanY * pxPerDegree) / 2;
-
-  return (point: GeoPoint) => ({
-    x: offsetX + (point.longitude - minLng) * eastWest * pxPerDegree,
-    y: offsetY + (maxLat - point.latitude) * pxPerDegree,
-  });
+// The smallest area holding all the points, for fitting the map to them
+function pointsBounds(points: GeoPoint[]): GeoBounds {
+  const latitudes = points.map((point) => point.latitude);
+  const longitudes = points.map((point) => point.longitude);
+  return [Math.min(...longitudes), Math.min(...latitudes), Math.max(...longitudes), Math.max(...latitudes)];
 }
 
 /* ─── Map layer ─────────────────────────────────────────────────── */
 
 interface MapLayerProps {
-  items: CompareItem[];
-  filter: Category;
-  selected: CompareItem | null;
   project: (point: GeoPoint) => { x: number; y: number };
-  onSelect: (key: string | null) => void;
 }
 
 function Marker({ item, faded, selected, position, onSelect }: { item: CompareItem; faded: boolean; selected: boolean; position: { x: number; y: number }; onSelect: () => void }) {
@@ -183,7 +277,7 @@ function Marker({ item, faded, selected, position, onSelect }: { item: CompareIt
         event.stopPropagation();
         onSelect();
       }}
-      className={`absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center transition-[opacity,transform] duration-300 ease-[var(--ease-expo)] hover:scale-125 ${
+      className={`pointer-events-auto absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center transition-[opacity,transform] duration-300 ease-[var(--ease-expo)] hover:scale-125 ${
         faded ? 'opacity-30' : 'opacity-100'
       } ${selected ? 'z-20 scale-150' : 'z-10'}`}
       style={{ left: position.x, top: position.y }}
@@ -251,7 +345,7 @@ function DetailCard({ item, bounds, tolerance, project, toRegister, onToggleRegi
 
   return (
     <div
-      className="absolute z-30 flex flex-col gap-[14px] bg-[#F7F6F1] px-[30px] py-[28px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]"
+      className="pointer-events-auto absolute z-30 flex flex-col gap-[14px] bg-[#F7F6F1] px-[30px] py-[28px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]"
       style={{ left, top, width: CARD_WIDTH }}
       onClick={(event) => event.stopPropagation()}
     >
@@ -279,31 +373,50 @@ function DetailCard({ item, bounds, tolerance, project, toRegister, onToggleRegi
   );
 }
 
-function MapLayer({ items, filter, selected, project, onSelect }: MapLayerProps) {
-  return (
-    <div className="absolute inset-0" onClick={() => onSelect(null)}>
-      {items.map((item) => (
-        <Marker
-          key={item.key}
-          item={item}
-          faded={item.category !== filter}
-          selected={item.key === selected?.key}
-          position={project(item.point)}
-          onSelect={() => onSelect(item.key)}
-        />
-      ))}
-    </div>
-  );
+interface MapMarksProps {
+  map: MapLibreMap | null;
+  scale: number;
+  filter: Category;
+  selected: CompareItem | null;
+  onSelect: (key: string | null) => void;
+  cardBounds: Bounds;
+  tolerance: number;
+  toRegister: boolean;
+  onToggleRegister: () => void;
 }
 
-// Before a register is uploaded the map only shows what the AI detected
-function DetectedMarkers({ project }: { project: MapLayerProps['project'] }) {
+// What follows the map as page elements: the selected well's marker, line and card (the other markers are the map's
+// icon layer). Only this draws again while the map is dragged or zoomed, not the panel beside it.
+function MapMarks({ map, scale, filter, selected, onSelect, cardBounds, tolerance, toRegister, onToggleRegister }: MapMarksProps) {
+  // slid along as a whole while the map is panned, placed afresh when it comes to rest or zooms
+  const { project: toScreen, layerRef } = useMapLayer(map, scale);
+  // where a well is on the stage: its screen position, in the stage's (scaled) pixels
+  const project = (point: GeoPoint) => {
+    const { x, y } = toScreen(point);
+    return { x: x / scale, y: y / scale };
+  };
   return (
-    <div className="pointer-events-none absolute inset-0">
-      {DETECTED_WELLS.map((well) => {
-        const { x, y } = project(well);
-        return <span key={well.id} className={`absolute -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_2px_6px_rgba(0,0,0,0.35)] ${MARKER_STYLES.detected}`} style={{ left: x, top: y }} />;
-      })}
+    <div ref={layerRef} className="absolute inset-0 will-change-transform">
+      {selected && (
+        <Marker
+          item={selected}
+          faded={selected.category !== filter}
+          selected
+          position={project(selected.point)}
+          onSelect={() => onSelect(selected.key)}
+        />
+      )}
+      {selected && <CounterpartLink item={selected} project={project} />}
+      {selected && (
+        <DetailCard
+          item={selected}
+          bounds={cardBounds}
+          tolerance={tolerance}
+          project={project}
+          toRegister={toRegister}
+          onToggleRegister={onToggleRegister}
+        />
+      )}
     </div>
   );
 }
@@ -536,7 +649,8 @@ function ResultList({ items, filter, toRegisterIds, selectedKey, onSelect, onExp
 
 /* ─── Page ──────────────────────────────────────────────────────── */
 
-export default function ComparePage() {
+// mapRecord: the map compared, when opened from one on the map page
+export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
   const scale = useFitScale(STAGE);
   const layout = stageLayout(scale, useViewportSize());
   const [register, setRegister] = useState<LegalRegister | null>(null);
@@ -550,11 +664,34 @@ export default function ComparePage() {
   const comparison = useMemo(() => (register ? compareWells(DETECTED_WELLS, register.wells, tolerance) : null), [register, tolerance]);
   const items = useMemo(() => (comparison ? toItems(comparison) : []), [comparison]);
   const { left: mapLeft, top: mapTop, width: mapWidth, height: mapHeight } = layout.map;
-  const project = useMemo(
-    () => makeProjection([...DETECTED_WELLS, ...(register?.wells ?? [])], { left: mapLeft, top: mapTop, width: mapWidth, height: mapHeight }),
-    [register, mapLeft, mapTop, mapWidth, mapHeight],
+  // the map starts fitted to the wells in the area right of the panel (the padding is in screen pixels)
+  const fit = useMemo(
+    () => ({
+      bounds: pointsBounds([...DETECTED_WELLS, ...(register?.wells ?? [])]),
+      padding: {
+        left: mapLeft * scale,
+        top: mapTop * scale,
+        right: (layout.width - mapLeft - mapWidth) * scale,
+        bottom: (layout.height - mapTop - mapHeight) * scale,
+      },
+    }),
+    [register, mapLeft, mapTop, mapWidth, mapHeight, layout.width, layout.height, scale],
   );
+  const [map, setMap] = useState<MapLibreMap | null>(null);
   const selected = items.find((item) => item.key === selectedKey) ?? null;
+  useMarkerLayer(map, comparison ? items : null, filter, selectedKey, scale);
+
+  // any move of the map closes the well's card (it would otherwise ride along over the panel). Every move here is the
+  // user's (dragging, scrolling, pinching: a scroll zoom's movestart carries no originalEvent to tell) or the map
+  // fitting itself to a resized window; picking a well from the list does not move it.
+  useEffect(() => {
+    if (!map) return;
+    const close = () => setSelectedKey(null);
+    map.on('movestart', close);
+    return () => {
+      map.off('movestart', close);
+    };
+  }, [map]);
   const counts = { matched: comparison?.matched.length ?? 0, unregistered: comparison?.unregistered.length ?? 0, missing: comparison?.missing.length ?? 0 };
 
   const loadFile = async (file: File) => {
@@ -583,44 +720,45 @@ export default function ComparePage() {
 
   return (
     <div className="relative h-screen overflow-hidden bg-[#2C322F]" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
-      {/* the same map as the map page, so moving between the two keeps the background still */}
+      {/* the survey map, dragged and zoomed like on the map page; clicking the map itself closes the well's card */}
       <PageBackgroundTransition>
         <div className="absolute inset-0 overflow-hidden">
-          <MapPhoto />
+          <TileMap
+            fit={fit}
+            interactive
+            onMapClick={(event) => setSelectedKey((map && iconAt(map, MARKER_LAYER, event.point, 'key')) || null)}
+            onReady={setMap}
+          />
           <MapShade />
         </div>
       </PageBackgroundTransition>
 
-      <div className="absolute inset-0">
+      {/* lets drags and clicks through to the map, except on the markers, cards and panel */}
+      <div className="pointer-events-none absolute inset-0">
         <div className="relative" style={{ width: layout.width, height: layout.height, zoom: scale }}>
           {/* page parts: fade out, then in, when moving to or from the map page, while the map itself stays still */}
           <div className="absolute inset-0" style={pagePart('compare-map')}>
-            {comparison ? (
-              <MapLayer items={items} filter={filter} selected={selected} project={project} onSelect={setSelectedKey} />
-            ) : (
-              <DetectedMarkers project={project} />
-            )}
-            {selected && <CounterpartLink item={selected} project={project} />}
-            {selected && (
-              <DetailCard
-                item={selected}
-                bounds={{ left: mapLeft - 60, right: layout.width - layout.gutter, top: layout.top, bottom: layout.height - layout.bottomGap }}
-                tolerance={tolerance}
-                project={project}
-                toRegister={toRegisterIds.has(selected.point.id)}
-                onToggleRegister={() => toggleToRegister(selected.point.id)}
-              />
-            )}
+            <MapMarks
+              map={map}
+              scale={scale}
+              filter={filter}
+              selected={selected}
+              onSelect={setSelectedKey}
+              cardBounds={{ left: mapLeft - 60, right: layout.width - layout.gutter, top: layout.top, bottom: layout.height - layout.bottomGap }}
+              tolerance={tolerance}
+              toRegister={selected !== null && toRegisterIds.has(selected.point.id)}
+              onToggleRegister={() => selected && toggleToRegister(selected.point.id)}
+            />
             <Legend compared={comparison !== null} position={{ right: layout.gutter, bottom: layout.bottomGap }} />
           </div>
-          <div className="absolute" style={{ ...pagePart('compare-export'), left: layout.gutter, bottom: layout.bottomGap }}>
+          <div className="pointer-events-auto absolute" style={{ ...pagePart('compare-export'), left: layout.gutter, bottom: layout.bottomGap }}>
             <ExportEntry />
           </div>
 
           {/* grown out of the map page's comparison shortcut */}
           <SharedTransition name={SHARED.compareArea}>
             <section
-              className="absolute flex flex-col gap-[22px] bg-[#F7F6F1] px-[44px] pb-[36px] pt-[40px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]"
+              className="pointer-events-auto absolute flex flex-col gap-[22px] bg-[#F7F6F1] px-[44px] pb-[36px] pt-[40px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]"
               style={{ left: layout.gutter, top: layout.panelTop, bottom: layout.panelBottom, width: PANEL_WIDTH }}
             >
               <header className="flex flex-col gap-[10px]">
@@ -660,7 +798,9 @@ export default function ComparePage() {
         </div>
       </div>
 
-      <BackToMapLink href="/map" />
+      <BackToMapLink href="/map" mapFile={mapRecord}>
+        <CursorCoordinates map={map} />
+      </BackToMapLink>
     </div>
   );
 }

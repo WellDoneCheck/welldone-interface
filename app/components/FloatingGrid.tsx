@@ -1,6 +1,8 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
+import Link from 'next/link';
+import SharedTransition, { ONLY_TO_MONITOR, SHARED, TO_MONITOR } from './SharedTransition';
 import { RECOGNITION_ACCURACY, WELL_TOTALS } from '../data/monitor';
 
 export default function FloatingGrid() {
@@ -72,8 +74,13 @@ export default function FloatingGrid() {
           <div style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
             <p className="text-xs font-bold uppercase tracking-[0.35em] text-[#3F7A7E]">AI Well Detection</p>
             <h2 className="mt-4 text-[10vw] font-black leading-[0.85] tracking-tight text-[#2C322F]">
-              {RECOGNITION_ACCURACY}
-              <span className="text-[0.42em] text-[#62A4A7]">%</span>
+              {/* flies into the monitor page's accuracy card; hugging the figure so it lands at its size there */}
+              <SharedTransition name={SHARED.recognitionAccuracy} share={ONLY_TO_MONITOR}>
+                <span className="inline-block">
+                  {RECOGNITION_ACCURACY}
+                  <span className="text-[0.42em] text-[#62A4A7]">%</span>
+                </span>
+              </SharedTransition>
             </h2>
             <p className="mt-4 text-[clamp(18px,1.7vw,30px)] font-bold text-[#2C322F]">水井辨識準確率</p>
             <div className="mt-8 max-w-sm border-l-2 border-[#62A4A7]/50 pl-6">
@@ -82,6 +89,16 @@ export default function FloatingGrid() {
                 從空拍影像自動找出水井，已驗證 {WELL_TOTALS.verified.toLocaleString()} 口、待驗證 {WELL_TOTALS.pending} 口，加速合法水井的登記與清查。
               </p>
             </div>
+            <Link
+              href="/monitor"
+              transitionTypes={TO_MONITOR}
+              className="group mt-10 inline-flex items-center gap-4 bg-[#62A4A7] px-8 py-4 text-[clamp(18px,1.4vw,24px)] font-bold tracking-[0.04em] text-white shadow-[8px_8px_40px_rgba(0,0,0,0.18)] outline-none transition-[translate,filter] duration-500 ease-[var(--ease-expo)] hover:-translate-y-1.5 hover:brightness-110 motion-reduce:transition-none focus-visible:shadow-[0_0_0_4px_#D1E6E7]"
+            >
+              監控總覽
+              <span aria-hidden className="transition-transform duration-500 ease-[var(--ease-expo)] group-hover:translate-x-1 motion-reduce:transition-none">
+                →
+              </span>
+            </Link>
           </div>
         </div>
 

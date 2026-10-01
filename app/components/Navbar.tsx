@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from '
 import { useRouter, usePathname } from 'next/navigation';
 import type { UserInfo } from './LoginPanel';
 import { lastVisitHref, subscribeToVisits, type VisitedPage } from '../utils/lastVisit';
+import { logoBackdropIsLight, subscribeToLogoBackdrop } from '../utils/logoBackdrop';
 
 interface NavbarProps {
   onLoginOpen: () => void;
@@ -51,6 +52,8 @@ export default function Navbar({
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const lastVisits: Record<VisitedPage, string | null> = { map: useLastVisitHref('map'), check: useLastVisitHref('check') };
+  // a map behind the logo says whether it is light there (TileMap); otherwise the word follows the rest of the navbar
+  const logoOnLight = useSyncExternalStore(subscribeToLogoBackdrop, logoBackdropIsLight, () => null) ?? inKove;
   const navLinks: NavLink[] = NAV_ITEMS.flatMap(({ label, href, lastVisit }) => {
     const target = lastVisit ? lastVisits[lastVisit] : href;
     return target ? [{ label, href: target, remembered: lastVisit !== undefined }] : [];
@@ -128,7 +131,9 @@ export default function Navbar({
             style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}
           >
             <span className="text-[#62A4A7]">Sky</span>
-            <span className={inKove ? 'text-gray-900' : 'text-white'}>Well</span>
+            <span data-nav-logo-word className={`transition-colors duration-500 ${logoOnLight ? 'text-gray-900' : 'text-white'}`}>
+              Well
+            </span>
           </span>
         </button>
 

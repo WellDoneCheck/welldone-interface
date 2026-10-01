@@ -1,10 +1,13 @@
 'use client';
 
-import { startTransition, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { useWellVerdicts } from './useWellVerdicts';
+import { setWellVerdict, verdictOf } from '../utils/wellVerdicts';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useFitScale, type FitStage } from './useFitScale';
 import { NAVBAR_HEIGHT } from './pageFrame';
+import SharedTransition, { ExportPageTransition, FROM_EXPORT, FROM_EXPORT_SHARE, SHARED } from './SharedTransition';
 import { EXPORT_WELLS, formatCoordinates, type ExportWell, type WellVerdict } from '../data/exportWells';
 import { buildWellsCsv } from '../utils/wellsCsv';
 import { downloadCsv } from '../utils/csv';
@@ -17,8 +20,8 @@ const CSV_FILE_NAME = 'skywell-wells.csv';
 // The aerial photo at the top of the page, fading into the paper colour at its bottom
 const HERO_HEIGHT = 1077;
 const HERO_FADE = 'bg-[linear-gradient(to_top,#F7F6F1_7.692%,rgba(18,20,18,0.2))]';
-// Space above the summary card: the page's own, and more as a sheet to fit the close button and show the page behind
-const TOP_SPACE = { page: 238, sheet: 310 };
+// Space above the summary card: under the navbar on the page, under the handle in the sheet
+const TOP_SPACE = { page: 238, sheet: 24 };
 // Share of the hero height from where the page is plain paper, so the navbar needs dark text over it
 const HERO_PAPER_FROM = 0.85;
 
@@ -98,15 +101,16 @@ interface HeroSummaryProps {
   pendingCount: number;
   selectedCount: number;
   onExport: () => void;
-  // over another page (as a sheet) the card is almost opaque so that page's text does not show through;
-  // no backdrop blur there, as blurring what is behind a sliding sheet would be redone on every frame
-  frosted: boolean;
+  // on the sheet's plain paper the card is white with a soft shadow; over the page's aerial photo it is frosted glass
+  onPaper: boolean;
 }
 
-function HeroSummary({ verifiedCount, pendingCount, selectedCount, onExport, frosted }: HeroSummaryProps) {
+function HeroSummary({ verifiedCount, pendingCount, selectedCount, onExport, onPaper }: HeroSummaryProps) {
   return (
     <div
-      className={`relative mx-[60px] flex h-[340px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] ${frosted ? 'bg-[rgba(247,246,241,0.92)]' : 'bg-[rgba(247,246,241,0.4)] backdrop-blur-[2px]'}`}
+      className={`relative mx-[60px] flex h-[340px] ${
+        onPaper ? 'bg-white shadow-[8px_8px_40px_0_rgba(0,0,0,0.12)]' : 'bg-[rgba(247,246,241,0.4)] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] backdrop-blur-[2px]'
+      }`}
     >
       <div className="flex w-[449px] flex-col justify-between pb-[48px] pl-[64px] pt-[48px] font-bold text-[#2C322F]">
         <p className="w-[280px] text-[20px] leading-[1.6]">管理並匯出 AI 水井辨識結果，支援多種地理資訊格式以利後續分析與建檔。</p>
@@ -130,31 +134,58 @@ function InfoLine({ icon, text }: { icon: string; text: string }) {
   );
 }
 
-function WellCard({ well, selected, onToggle, onVerdict }: { well: ExportWell; selected: boolean; onToggle: () => void; onVerdict: (verdict: WellVerdict) => void }) {
+interface WellCardProps {
+  well: ExportWell;
+  selected: boolean;
+  // this card's photo, id, coordinates and time move to the check page (only the card being opened: a name is unique)
+  shared: boolean;
+  onToggle: () => void;
+  onVerdict: (verdict: WellVerdict) => void;
+  onOpen: () => void;
+}
+
+function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellCardProps) {
   const badge = badgeFor(well.verdict);
 
   return (
     // cards scrolled out of the row are not rendered until they come into view (105 cards with large shadows)
     <article className="w-[320px] shrink-0 snap-start bg-white pb-[16px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] [contain-intrinsic-size:auto_320px_auto_440px] [content-visibility:auto]">
       <div className="relative h-[320px] w-[320px]">
-        {/* the photo opens this well on the check page to compare its captures */}
-        <Link
-          href={`/check?record=${well.id}`}
-          aria-label={`檢查 ${well.id}：比對多期影像`}
-          className="group/photo absolute inset-0 block overflow-hidden outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
-        >
-          <Image
-            src="/export/well-tile.png"
-            alt={`${well.id} 空拍影像`}
-            fill
-            sizes="320px"
-            className="object-cover transition-transform duration-500 ease-[var(--ease-expo)] group-hover/photo:scale-[1.04]"
-          />
-          <span className="absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-[14px] opacity-0 transition-opacity duration-300 group-hover/photo:opacity-100 group-focus-visible/photo:opacity-100">
-            <span className="text-[16px] font-bold text-white">進入檢查　比對多期影像 →</span>
-          </span>
-          <Image src="/export/icon-eye.png" alt="" width={24} height={24} className="absolute bottom-[8px] right-[10px]" />
-        </Link>
+        {/* the photo opens this well on the check page to compare its captures; clicking it first marks this card as the
+            one whose parts move there */}
+        <SharedTransition name={SHARED.wellPhoto} enabled={shared} share={FROM_EXPORT_SHARE}>
+          <Link
+            href={`/check?record=${well.id}`}
+            transitionTypes={FROM_EXPORT}
+            onClick={onOpen}
+            aria-label={`檢查 ${well.id}：比對多期影像`}
+            className="group/photo absolute inset-0 block overflow-hidden outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
+          >
+            {/* once opened, the photo drops its hover look at once, so it flies to the check page as the bare capture */}
+            <Image
+              src="/export/well-tile.webp"
+              unoptimized
+              alt={`${well.id} 空拍影像`}
+              fill
+              sizes="320px"
+              className={`object-cover ${shared ? '' : 'transition-transform duration-500 ease-[var(--ease-expo)] group-hover/photo:scale-[1.04]'}`}
+            />
+            <span
+              className={`absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-[14px] opacity-0 transition-opacity duration-300 group-hover/photo:opacity-100 group-focus-visible/photo:opacity-100 ${
+                shared ? 'invisible' : ''
+              }`}
+            >
+              <span className="text-[16px] font-bold text-white">進入檢查　比對多期影像 →</span>
+            </span>
+            <Image
+              src="/export/icon-eye.png"
+              alt=""
+              width={24}
+              height={24}
+              className={`absolute bottom-[8px] right-[10px] ${shared ? 'invisible' : ''}`}
+            />
+          </Link>
+        </SharedTransition>
         <span className={`pointer-events-none absolute left-[8px] top-[8px] flex h-[30px] items-center px-[12px] text-[16px] font-black ${badge.className}`}>
           {badge.label}
         </span>
@@ -164,10 +195,16 @@ function WellCard({ well, selected, onToggle, onVerdict }: { well: ExportWell; s
       </div>
 
       <div className="px-[20px] pt-[14px]">
-        <h3 className="text-[22px] font-bold leading-[normal] text-[#2C322F]">{well.id}</h3>
+        <SharedTransition name={SHARED.wellId} enabled={shared} share={FROM_EXPORT_SHARE}>
+          <h3 className="text-[22px] font-bold leading-[normal] text-[#2C322F]">{well.id}</h3>
+        </SharedTransition>
         <div className="mt-[6px] flex flex-col gap-[3px] pl-[2px]">
-          <InfoLine icon="/export/icon-location.png" text={formatCoordinates(well)} />
-          <InfoLine icon="/export/icon-clock.png" text={well.capturedAt} />
+          <SharedTransition name={SHARED.wellCoordinates} enabled={shared} share={FROM_EXPORT_SHARE}>
+            <InfoLine icon="/export/icon-location.png" text={formatCoordinates(well)} />
+          </SharedTransition>
+          <SharedTransition name={SHARED.wellTime} enabled={shared} share={FROM_EXPORT_SHARE}>
+            <InfoLine icon="/export/icon-clock.png" text={well.capturedAt} />
+          </SharedTransition>
         </div>
         {well.verdict === null && (
           <div className="mt-[20px] flex gap-[16px]">
@@ -232,9 +269,12 @@ interface WellSectionProps {
   onToggle: (id: string) => void;
   onToggleAll: (ids: string[], select: boolean) => void;
   onVerdict: (id: string, verdict: WellVerdict) => void;
+  // the well being opened on the check page
+  openingId: string | null;
+  onOpen: (id: string) => void;
 }
 
-function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdict }: WellSectionProps) {
+function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdict, openingId, onOpen }: WellSectionProps) {
   const listRef = useRef<HTMLDivElement>(null);
   const { title, countColor } = SECTIONS[kind];
   const allSelected = wells.length > 0 && wells.every((well) => selectedIds.has(well.id));
@@ -269,8 +309,10 @@ function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdic
               key={well.id}
               well={well}
               selected={selectedIds.has(well.id)}
+              shared={openingId === well.id}
               onToggle={() => onToggle(well.id)}
               onVerdict={(verdict) => onVerdict(well.id, verdict)}
+              onOpen={() => onOpen(well.id)}
             />
           ))}
         </div>
@@ -281,19 +323,6 @@ function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdic
 }
 
 /* ─── Page ──────────────────────────────────────────────────────── */
-
-function CloseSheetButton({ onClose }: { onClose: () => void }) {
-  return (
-    <button
-      type="button"
-      onClick={onClose}
-      className="absolute left-1/2 top-[228px] flex h-[52px] -translate-x-1/2 items-center gap-[12px] bg-[rgba(247,246,241,0.9)] px-[28px] text-[20px] font-bold text-[#2C322F] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] backdrop-blur-md transition-transform duration-300 ease-[var(--ease-expo)] hover:translate-y-0.5"
-    >
-      收合
-      <span className="text-[#3F7A7E]">↓</span>
-    </button>
-  );
-}
 
 // True once the marker has scrolled up under the navbar; the navbar then switches to dark text (see Navbar's data-nav-light).
 // Scroll events are caught on the document so this works both when the window scrolls and when the sheet does.
@@ -324,14 +353,19 @@ function useNavLightPast(marker: RefObject<HTMLDivElement | null>): boolean {
   return light;
 }
 
-// With onClose it is shown as a sheet over another page: that page shows through the hero instead of the aerial photo
-export default function ExportPage({ onClose }: { onClose?: () => void }) {
+// As a page: the aerial photo at the top, fading into paper. In the pull-up sheet (inSheet), only the summary and the
+// wells on the sheet's paper, with the page it was opened from behind the sheet.
+export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
   const scale = useFitScale(EXPORT_STAGE);
   const heroHeight = HERO_HEIGHT * scale;
   const paperMarker = useRef<HTMLDivElement>(null);
   const navLight = useNavLightPast(paperMarker);
-  const [wells, setWells] = useState(EXPORT_WELLS);
+  // the placeholder wells with the verdicts given so far, here or on the check page (shared, so the sheet shows them
+  // again when it opens next time)
+  const verdicts = useWellVerdicts();
+  const wells = useMemo(() => EXPORT_WELLS.map((well) => ({ ...well, verdict: verdictOf(well, verdicts) })), [verdicts]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [openingId, setOpeningId] = useState<string | null>(null);
 
   const verifiedWells = wells.filter((well) => well.verdict !== null);
   const pendingWells = wells.filter((well) => well.verdict === null);
@@ -350,38 +384,38 @@ export default function ExportPage({ onClose }: { onClose?: () => void }) {
       return next;
     });
 
-  const setVerdict = (id: string, verdict: WellVerdict) =>
-    setWells((current) => current.map((well) => (well.id === id ? { ...well, verdict } : well)));
+  const sectionProps = { selectedIds, onToggle: toggleWell, onToggleAll: toggleAll, onVerdict: setWellVerdict, openingId, onOpen: setOpeningId };
 
-  const sectionProps = { selectedIds, onToggle: toggleWell, onToggleAll: toggleAll, onVerdict: setVerdict };
+  const content = (
+    <div className="relative mx-auto w-[1920px] pb-[160px]" style={{ zoom: scale, paddingTop: inSheet ? TOP_SPACE.sheet : TOP_SPACE.page }}>
+      <HeroSummary
+        verifiedCount={verifiedWells.length}
+        pendingCount={pendingWells.length}
+        selectedCount={selectedIds.size}
+        onExport={() => downloadCsv(CSV_FILE_NAME, buildWellsCsv(wells.filter((well) => selectedIds.has(well.id))))}
+        onPaper={inSheet}
+      />
+      <WellSection kind="verified" wells={verifiedWells} {...sectionProps} />
+      <WellSection kind="pending" wells={pendingWells} {...sectionProps} />
+    </div>
+  );
+
+  if (inSheet) return <div style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>{content}</div>;
 
   return (
-    <div
-      data-nav-light={String(navLight)}
-      className="relative min-h-screen overflow-hidden"
-      style={{
-        fontFamily: 'var(--font-noto-serif-tc), serif',
-        background: onClose ? `linear-gradient(to bottom, transparent ${heroHeight}px, #F7F6F1 ${heroHeight}px)` : '#F7F6F1',
-      }}
-    >
-      <div className="absolute inset-x-0 top-0" style={{ height: heroHeight }}>
-        {!onClose && <Image src="/aerial-bg.png" alt="" fill priority sizes="100vw" className="object-cover" />}
-        <div className={`absolute inset-0 ${HERO_FADE}`} />
+    <ExportPageTransition>
+      <div
+        data-nav-light={String(navLight)}
+        className="relative min-h-screen overflow-hidden bg-[#F7F6F1]"
+        style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}
+      >
+        <div className="absolute inset-x-0 top-0" style={{ height: heroHeight }}>
+          <Image src="/aerial-bg.webp" unoptimized alt="" fill priority sizes="100vw" className="object-cover" />
+          <div className={`absolute inset-0 ${HERO_FADE}`} />
+        </div>
+        <div ref={paperMarker} className="pointer-events-none absolute inset-x-0 h-px" style={{ top: heroHeight * HERO_PAPER_FROM }} />
+        {content}
       </div>
-      <div ref={paperMarker} className="pointer-events-none absolute inset-x-0 h-px" style={{ top: heroHeight * HERO_PAPER_FROM }} />
-
-      <div className="relative mx-auto w-[1920px] pb-[160px]" style={{ zoom: scale, paddingTop: onClose ? TOP_SPACE.sheet : TOP_SPACE.page }}>
-        {onClose && <CloseSheetButton onClose={onClose} />}
-        <HeroSummary
-          verifiedCount={verifiedWells.length}
-          pendingCount={pendingWells.length}
-          selectedCount={selectedIds.size}
-          onExport={() => downloadCsv(CSV_FILE_NAME, buildWellsCsv(wells.filter((well) => selectedIds.has(well.id))))}
-          frosted={onClose !== undefined}
-        />
-        <WellSection kind="verified" wells={verifiedWells} {...sectionProps} />
-        <WellSection kind="pending" wells={pendingWells} {...sectionProps} />
-      </div>
-    </div>
+    </ExportPageTransition>
   );
 }

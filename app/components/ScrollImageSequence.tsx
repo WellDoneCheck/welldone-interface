@@ -19,7 +19,7 @@ interface ScrollImageSequenceProps {
 // The map ends up at this fraction of the viewport, centered on a beige background
 const SHRINK_END_SCALE = 0.515;
 // Wide aerial photo the last frame cross-fades into while shrinking (loaded near the end of the frames)
-const SHRINK_IMAGE = '/aerial-bg.png';
+const SHRINK_IMAGE = '/aerial-bg.webp';
 const SHRINK_IMAGE_PRELOAD_PROGRESS = 0.8;
 // Scrolling holds still this long once the map has finished shrinking (going down),
 // then glides on into the photo wall by itself over SHRINK_EXIT_MS

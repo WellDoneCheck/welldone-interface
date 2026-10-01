@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import Image from 'next/image';
-import SharedTransition, { SHARED } from './SharedTransition';
+import SharedTransition, { FROM_EXPORT_SHARE, SHARED } from './SharedTransition';
 import { dayPeriodLabel, describeGap, formatDate, formatMonthDay, formatYear, type Capture } from '../data/captures';
 
 const EASE = 'ease-[var(--ease-expo)] motion-reduce:transition-none';
@@ -14,25 +14,19 @@ const TILE_CONTENT_SIZE = '135%';
 const KEY_STEP = 2;
 const KEY_STEP_LARGE = 10;
 
-/* ─── Selection ─────────────────────────────────────────────────── */
+/* ─── Roles ─────────────────────────────────────────────────────── */
 
-interface Selection {
-  earlier: number;
-  later: number;
-}
+// The newest capture is always the current one; any older capture can be picked to compare against it
+type Role = 'compare' | 'current';
 
-// Clicking a capture moves whichever selected end is closer to it, so earlier < later always holds
-export function nextSelection({ earlier, later }: Selection, clicked: number): Selection {
-  if (clicked === earlier || clicked === later) return { earlier, later };
-  if (clicked < earlier) return { earlier: clicked, later };
-  if (clicked > later) return { earlier, later: clicked };
-  return clicked - earlier < later - clicked ? { earlier: clicked, later } : { earlier, later: clicked };
-}
+const ROLE_LABEL: Record<Role, string> = { compare: '比較', current: '目前' };
+const ROLE_COLOR: Record<Role, string> = { compare: 'bg-[#62A4A7]', current: 'bg-[#3F7A7E]' };
 
-// Fake difference between captures until real imagery is connected
+// Fake difference between captures until real imagery is connected: the older the capture, the more it looks like an
+// old photo (yellowed, faded, darker), so the two sides of the divider are easy to tell apart
 function captureFilter(index: number, total: number): string {
-  const progress = index / Math.max(total - 1, 1);
-  return `hue-rotate(${Math.round((progress - 0.5) * 14)}deg) saturate(${(0.82 + progress * 0.3).toFixed(2)}) brightness(${(0.94 + progress * 0.1).toFixed(2)})`;
+  const age = 1 - index / Math.max(total - 1, 1);
+  return `sepia(${(age * 0.6).toFixed(2)}) saturate(${(1 - age * 0.45).toFixed(2)}) brightness(${(1 - age * 0.22).toFixed(2)}) contrast(${(1 - age * 0.12).toFixed(2)})`;
 }
 
 const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
@@ -41,7 +35,7 @@ const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
 
 interface CompareViewProps {
   captures: Capture[];
-  selection: Selection;
+  compareIndex: number;
 }
 
 // Square view of a capture's imagery (the tile's content square scaled up to fill the frame)
@@ -49,17 +43,17 @@ function CaptureImage({ index, total, size }: { index: number; total: number; si
   return (
     <div className="absolute inset-0 overflow-hidden" style={{ filter: captureFilter(index, total) }}>
       <div className="absolute left-0 top-0" style={{ width: TILE_CONTENT_SIZE, height: TILE_CONTENT_SIZE }}>
-        <Image src="/aerial-tile.png" alt="" fill sizes={`${Math.round(size * 1.35)}px`} className="object-cover" draggable={false} />
+        <Image src="/aerial-tile.webp" unoptimized alt="" fill sizes={`${Math.round(size * 1.35)}px`} className="object-cover" draggable={false} />
       </div>
     </div>
   );
 }
 
 // Tag naming which side of the comparison an image half is, in the same colors as the timeline
-function CompareTag({ role, date, className }: { role: 'earlier' | 'later'; date: string; className: string }) {
+function CompareTag({ role, date, className }: { role: Role; date: string; className: string }) {
   return (
     <span className={`pointer-events-none absolute left-4 flex items-stretch text-[18px] font-bold leading-[32px] shadow-[0_2px_8px_rgba(0,0,0,0.25)] ${className}`}>
-      <span className={`px-3 text-white ${role === 'earlier' ? 'bg-[#62A4A7]' : 'bg-[#3F7A7E]'}`}>{role === 'earlier' ? '較早' : '較晚'}</span>
+      <span className={`px-3 text-white ${ROLE_COLOR[role]}`}>{ROLE_LABEL[role]}</span>
       <span className="bg-[#2C322F]/70 px-3 text-white">{date}</span>
     </span>
   );
@@ -74,12 +68,13 @@ function GripChevron({ direction }: { direction: 'up' | 'down' }) {
   );
 }
 
-// Earlier capture on top, later capture below, split by a line dragged up and down
-function CompareView({ captures, selection }: CompareViewProps) {
+// Compared capture on top, current capture below, split by a line dragged up and down
+function CompareView({ captures, compareIndex }: CompareViewProps) {
   const [position, setPosition] = useState(50);
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const earlier = captures[selection.earlier];
-  const later = captures[selection.later];
+  const currentIndex = captures.length - 1;
+  const compared = captures[compareIndex];
+  const current = captures[currentIndex];
 
   const moveTo = useCallback((clientY: number) => {
     const surface = surfaceRef.current;
@@ -111,7 +106,7 @@ function CompareView({ captures, selection }: CompareViewProps) {
   };
 
   return (
-    <SharedTransition name={SHARED.wellPhoto}>
+    <SharedTransition name={SHARED.wellPhoto} share={FROM_EXPORT_SHARE}>
       <div
         ref={surfaceRef}
         className="group relative shrink-0 cursor-ns-resize touch-none select-none overflow-hidden bg-[#464A3A]"
@@ -119,10 +114,10 @@ function CompareView({ captures, selection }: CompareViewProps) {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
       >
-        {/* later capture underneath, earlier capture clipped on top */}
-        <CaptureImage index={selection.later} total={captures.length} size={IMAGE_SIZE} />
+        {/* current capture underneath, compared capture clipped on top */}
+        <CaptureImage index={currentIndex} total={captures.length} size={IMAGE_SIZE} />
         <div className="absolute inset-0" style={{ clipPath: `inset(0 0 ${100 - position}% 0)` }}>
-          <CaptureImage index={selection.earlier} total={captures.length} size={IMAGE_SIZE} />
+          <CaptureImage index={compareIndex} total={captures.length} size={IMAGE_SIZE} />
         </div>
 
         {/* well marker, placed by % so it stays on the same spot of the square image */}
@@ -134,8 +129,8 @@ function CompareView({ captures, selection }: CompareViewProps) {
           className="pointer-events-none absolute left-[47.3%] top-[9.1%] h-auto w-[8.5%] max-w-none"
         />
 
-        <CompareTag role="earlier" date={formatDate(earlier.capturedAt)} className="top-4" />
-        <CompareTag role="later" date={formatDate(later.capturedAt)} className="bottom-4" />
+        <CompareTag role="compare" date={formatDate(compared.capturedAt)} className="top-4" />
+        <CompareTag role="current" date={formatDate(current.capturedAt)} className="bottom-4" />
 
         {/* divider: a line in the timeline's colors with a grip in the middle */}
         <div
@@ -150,7 +145,7 @@ function CompareView({ captures, selection }: CompareViewProps) {
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(position)}
-          aria-valuetext={`${formatDate(earlier.capturedAt)} 佔 ${Math.round(position)}%`}
+          aria-valuetext={`${formatDate(compared.capturedAt)} 佔 ${Math.round(position)}%`}
           onKeyDown={onKeyDown}
           className={`absolute left-1/2 flex h-[30px] w-[72px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-[6px] rounded-full border-2 border-white bg-[#2C322F] text-white shadow-[0_4px_14px_rgba(0,0,0,0.4)] outline-none transition-transform duration-300 ${EASE} group-active:scale-110 focus-visible:shadow-[0_0_0_3px_#62A4A7]`}
           style={{ top: `${position}%` }}
@@ -167,19 +162,23 @@ function CompareView({ captures, selection }: CompareViewProps) {
 /* ─── Film strip timeline ───────────────────────────────────────── */
 
 // Each capture is a frame of a vertical film strip beside the image, oldest at the top:
-// a preview of that capture with its date to the right, and the compare bracket along the image edge
+// a preview of that capture with its date to the right, and the compare bracket along the image edge.
+// Frames spread over the image height; when there are too many to fit, the strip scrolls.
 const STRIP_PADDING = 26;
 const STRIP_WIDTH = 270;
 const FRAME_HEIGHT = 84;
 const FRAME_SIZE = 72;
 const FRAME_LEFT = 18;
+const MIN_FRAME_PITCH = 94;
 const BRACKET_X = 238;
 
-const frameTop = (index: number, total: number) =>
-  STRIP_PADDING + (index * (IMAGE_SIZE - 2 * STRIP_PADDING - FRAME_HEIGHT)) / Math.max(total - 1, 1);
+const framePitch = (total: number) =>
+  Math.max(MIN_FRAME_PITCH, (IMAGE_SIZE - 2 * STRIP_PADDING - FRAME_HEIGHT) / Math.max(total - 1, 1));
+const frameTop = (index: number, total: number) => STRIP_PADDING + index * framePitch(total);
 const frameCenter = (index: number, total: number) => frameTop(index, total) + FRAME_HEIGHT / 2;
+const stripHeight = (total: number) => frameTop(total - 1, total) + FRAME_HEIGHT + STRIP_PADDING;
 
-type FrameRole = 'earlier' | 'later' | null;
+type FrameRole = Role | null;
 
 interface FilmFrameProps {
   capture: Capture;
@@ -192,19 +191,21 @@ interface FilmFrameProps {
 
 function FilmFrame({ capture, index, total, role, period, onSelect }: FilmFrameProps) {
   const border =
-    role === 'earlier'
+    role === 'compare'
       ? 'outline outline-[3px] outline-[#62A4A7] shadow-[0_0_0_7px_rgba(98,164,167,0.22)]'
-      : role === 'later'
+      : role === 'current'
         ? 'outline outline-[3px] outline-[#3F7A7E] shadow-[0_0_0_7px_rgba(63,122,126,0.2)]'
         : 'opacity-80 group-hover:translate-x-0.5 group-hover:opacity-100 group-focus-visible:opacity-100';
 
   return (
     <button
       type="button"
+      // the current capture stays fixed
+      disabled={role === 'current'}
       aria-pressed={role !== null}
-      aria-label={`${capture.capturedAt}${role === 'earlier' ? '，比對較早影像' : role === 'later' ? '，比對較晚影像' : '，點擊加入比對'}`}
+      aria-label={`${capture.capturedAt}${role === 'compare' ? '，比較影像' : role === 'current' ? '，目前影像' : '，點擊設為比較影像'}`}
       onClick={() => onSelect(index)}
-      className="group absolute flex cursor-pointer items-center gap-4 text-left outline-none"
+      className="group absolute flex cursor-pointer items-center gap-4 text-left outline-none disabled:cursor-default"
       style={{ top: frameTop(index, total), left: FRAME_LEFT, height: FRAME_HEIGHT }}
     >
       <span className={`relative block shrink-0 overflow-hidden transition-all duration-300 ${EASE} ${border}`} style={{ width: FRAME_SIZE, height: FRAME_SIZE }}>
@@ -215,9 +216,7 @@ function FilmFrame({ capture, index, total, role, period, onSelect }: FilmFrameP
         {/* which side of the comparison this frame is — or, on hover, its exact time */}
         <span className="flex h-[24px] items-center">
           {role ? (
-            <span className={`px-2 text-sm font-bold leading-[22px] text-white ${role === 'earlier' ? 'bg-[#62A4A7]' : 'bg-[#3F7A7E]'}`}>
-              {role === 'earlier' ? '較早' : '較晚'}
-            </span>
+            <span className={`px-2 text-sm font-bold leading-[22px] text-white ${ROLE_COLOR[role]}`}>{ROLE_LABEL[role]}</span>
           ) : (
             <span className="hidden whitespace-nowrap bg-[#2C322F] px-2 text-sm font-bold leading-[22px] text-[#F7F6F1] group-hover:block group-focus-visible:block">
               {capture.capturedAt.slice(11)}
@@ -238,57 +237,68 @@ function FilmFrame({ capture, index, total, role, period, onSelect }: FilmFrameP
 
 interface FilmStripProps {
   captures: Capture[];
-  selection: Selection;
+  compareIndex: number;
   onSelect: (index: number) => void;
 }
 
-function FilmStrip({ captures, selection, onSelect }: FilmStripProps) {
+function FilmStrip({ captures, compareIndex, onSelect }: FilmStripProps) {
   const total = captures.length;
-  const earlierY = frameCenter(selection.earlier, total);
-  const laterY = frameCenter(selection.later, total);
-  const gap = describeGap(captures[selection.earlier].capturedAt, captures[selection.later].capturedAt);
+  const currentIndex = total - 1;
+  const compareY = frameCenter(compareIndex, total);
+  const currentY = frameCenter(currentIndex, total);
+  const gap = describeGap(captures[compareIndex].capturedAt, captures[currentIndex].capturedAt);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+
+  // open at the newest end, where the current capture is
+  useLayoutEffect(() => {
+    const scroller = scrollerRef.current;
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;
+  }, []);
 
   return (
     <div
-      className="relative shrink-0 overflow-hidden border-r border-[#E5E2D9] bg-[#F7F6F1]"
+      ref={scrollerRef}
+      className="relative shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain border-r border-[#E5E2D9] bg-[#F7F6F1] [scrollbar-color:rgba(44,50,47,0.3)_transparent] [scrollbar-width:thin]"
       style={{ width: STRIP_WIDTH, height: IMAGE_SIZE }}
     >
-      {/* base rail beside all frames */}
-      <div className="absolute w-px bg-[#2C322F]/20" style={{ left: BRACKET_X, top: frameCenter(0, total), bottom: IMAGE_SIZE - frameCenter(total - 1, total) }} />
+      <div className="relative" style={{ height: stripHeight(total) }}>
+        {/* base rail beside all frames */}
+        <div className="absolute w-px bg-[#2C322F]/20" style={{ left: BRACKET_X, top: frameCenter(0, total), bottom: stripHeight(total) - frameCenter(total - 1, total) }} />
 
-      {/* bracket joining the two compared frames */}
-      <div
-        className={`absolute w-[2px] bg-gradient-to-b from-[#62A4A7] to-[#3F7A7E] transition-[top,height] duration-500 ${EASE}`}
-        style={{ left: BRACKET_X - 1, top: earlierY, height: laterY - earlierY }}
-      />
-      {[
-        { y: earlierY, color: 'bg-[#62A4A7]' },
-        { y: laterY, color: 'bg-[#3F7A7E]' },
-      ].map(({ y, color }) => (
+        {/* bracket joining the two compared frames */}
+        <div
+          className={`absolute w-[2px] bg-gradient-to-b from-[#62A4A7] to-[#3F7A7E] transition-[top,height] duration-500 ${EASE}`}
+          style={{ left: BRACKET_X - 1, top: compareY, height: currentY - compareY }}
+        />
+        {[
+          { y: compareY, color: ROLE_COLOR.compare },
+          { y: currentY, color: ROLE_COLOR.current },
+        ].map(({ y, color }) => (
+          <span
+            key={color}
+            className={`absolute h-[2px] w-[10px] -translate-y-1/2 transition-[top] duration-500 ${EASE} ${color}`}
+            style={{ left: BRACKET_X - 9, top: y }}
+          />
+        ))}
         <span
-          key={color}
-          className={`absolute h-[2px] w-[10px] -translate-y-1/2 transition-[top] duration-500 ${EASE} ${color}`}
-          style={{ left: BRACKET_X - 9, top: y }}
-        />
-      ))}
-      <span
-        className={`absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap border border-[#62A4A7] bg-white py-2 text-sm leading-[22px] text-[#3F7A7E] transition-[top] duration-500 [writing-mode:vertical-rl] ${EASE}`}
-        style={{ left: BRACKET_X, top: (earlierY + laterY) / 2 }}
-      >
-        相隔 {gap}
-      </span>
+          className={`absolute -translate-x-1/2 -translate-y-1/2 whitespace-nowrap border border-[#62A4A7] bg-white py-2 text-sm leading-[22px] text-[#3F7A7E] transition-[top] duration-500 [writing-mode:vertical-rl] ${EASE}`}
+          style={{ left: BRACKET_X, top: (compareY + currentY) / 2 }}
+        >
+          相隔 {gap}
+        </span>
 
-      {captures.map((capture, index) => (
-        <FilmFrame
-          key={capture.id}
-          capture={capture}
-          index={index}
-          total={total}
-          role={index === selection.earlier ? 'earlier' : index === selection.later ? 'later' : null}
-          period={dayPeriodLabel(captures, index)}
-          onSelect={onSelect}
-        />
-      ))}
+        {captures.map((capture, index) => (
+          <FilmFrame
+            key={capture.id}
+            capture={capture}
+            index={index}
+            total={total}
+            role={index === compareIndex ? 'compare' : index === currentIndex ? 'current' : null}
+            period={dayPeriodLabel(captures, index)}
+            onSelect={onSelect}
+          />
+        ))}
+      </div>
     </div>
   );
 }
@@ -296,18 +306,15 @@ function FilmStrip({ captures, selection, onSelect }: FilmStripProps) {
 /* ─── Panel ─────────────────────────────────────────────────────── */
 
 export default function TimelineCompare({ captures }: { captures: Capture[] }) {
-  const [selection, setSelection] = useState<Selection>({
-    earlier: Math.max(captures.length - 3, 0),
-    later: captures.length - 1,
-  });
+  const [compareIndex, setCompareIndex] = useState(Math.max(captures.length - 3, 0));
 
   return (
     <div
       className="flex bg-white shadow-[0_0_0_1px_rgba(44,50,47,0.14),0_4px_20px_0_rgba(0,0,0,0.5),0_10px_28px_0_rgba(44,50,47,0.06)]"
       style={{ height: IMAGE_SIZE }}
     >
-      <FilmStrip captures={captures} selection={selection} onSelect={(index) => setSelection((current) => nextSelection(current, index))} />
-      <CompareView captures={captures} selection={selection} />
+      <FilmStrip captures={captures} compareIndex={compareIndex} onSelect={setCompareIndex} />
+      <CompareView captures={captures} compareIndex={compareIndex} />
     </div>
   );
 }

@@ -83,7 +83,7 @@ export default function SiteChrome({ children }: { children: ReactNode }) {
         onLogout={() => setUserInfo(null)}
       />
       {children}
-      {userInfo && <CopilotWidget hidden={heroAnimating} />}
+      {userInfo && <CopilotWidget />}
     </SiteChromeContext>
   );
 }
