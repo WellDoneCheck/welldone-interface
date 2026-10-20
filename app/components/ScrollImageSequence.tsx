@@ -1,6 +1,7 @@
 'use client';
 
-import { useRef, useEffect, useState, useCallback } from 'react';
+import { useRef, useEffect, useState, useCallback, type ReactNode } from 'react';
+import WellLoader from './WellLoader';
 
 interface ScrollImageSequenceProps {
   totalFrames: number;
@@ -11,20 +12,28 @@ interface ScrollImageSequenceProps {
   shrinkHeight?: number;
   className?: string;
   onAnimatingChange?: (animating: boolean) => void;
+  // Laid over the first screen (e.g. a shortcut, placed by the caller); rises and fades out with the title
+  heroAction?: ReactNode;
 }
 
-// The map ends up at this fraction of the viewport, centered on a white background
+// The map ends up at this fraction of the viewport, centered on a beige background
 const SHRINK_END_SCALE = 0.515;
 // Wide aerial photo the last frame cross-fades into while shrinking (loaded near the end of the frames)
-const SHRINK_IMAGE = '/aerial-bg.png';
+const SHRINK_IMAGE = '/aerial-bg.webp';
 const SHRINK_IMAGE_PRELOAD_PROGRESS = 0.8;
 // Scrolling holds still this long once the map has finished shrinking (going down),
 // then glides on into the photo wall by itself over SHRINK_EXIT_MS
 const SHRINK_DWELL_MS = 1000;
 const SHRINK_EXIT_MS = 1600;
+// scrollY can be fractional (display scaling, browser zoom), so positions are compared with this slack
+const SCROLL_TOLERANCE_PX = 2;
 const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ']);
 // Navbar switches to dark text once the shrink passes this point
 const NAV_LIGHT_THRESHOLD = 0.25;
+// The intro loader stays at least this long, its bar filling over that time even when the frames load at once,
+// then fades out over the ready page
+const MIN_LOADING_MS = 900;
+const LOADER_FADE_MS = 450;
 
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 // Gentler than cubic (no steep middle): used for the scroll-driven shrink so it never feels rushed
@@ -37,6 +46,7 @@ export default function ScrollImageSequence({
   shrinkHeight = 100,
   className,
   onAnimatingChange,
+  heroAction,
 }: ScrollImageSequenceProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -47,11 +57,17 @@ export default function ScrollImageSequence({
   const pendingFrameRef = useRef<number>(-1);
   const frameCacheRef = useRef<Map<number, HTMLImageElement>>(new Map);
   const decodedFramesRef = useRef<Set<number>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const [framesReady, setFramesReady] = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
+  const [timeProgress, setTimeProgress] = useState(0);
+  const [loaderMounted, setLoaderMounted] = useState(true);
+  const loading = !framesReady || timeProgress < 100;
+  // the bar shows whichever is behind: the frames loaded or the minimum time passed
+  const shownProgress = Math.min(loadProgress, timeProgress);
   const gradientRef = useRef<HTMLDivElement>(null);
   const maskGradientRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLDivElement>(null);
+  const heroActionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const scalerRef = useRef<HTMLDivElement>(null);
   const shrinkImgRef = useRef<HTMLImageElement>(null);
@@ -182,7 +198,7 @@ export default function ScrollImageSequence({
             shrinkImg.style.opacity = String(easeInOutSine(fade));
           }
 
-          // Let the navbar know the stage is light (white) so it can use dark text
+          // Let the navbar know the stage is light (beige) so it can use dark text
           const stage = stageRef.current;
           const navLight = String(shrinkProgress > NAV_LIGHT_THRESHOLD);
           if (stage && stage.dataset.navLight !== navLight) {
@@ -202,9 +218,9 @@ export default function ScrollImageSequence({
           // through the shrink straight into the photo wall
           setArrowVisible(!animatingRef.current && frame < totalFrames - 1);
 
-          // Handle text animation
-          const textEl = textRef.current;
-          if (textEl) {
+          // Handle text animation (the hero action moves with the title)
+          for (const textEl of [textRef.current, heroActionRef.current]) {
+            if (!textEl) continue;
             const hideStart = 2 / totalFrames;
             const hideEnd = 20 / totalFrames;
             let ty = 0;
@@ -246,12 +262,14 @@ export default function ScrollImageSequence({
     let lastY = window.scrollY;
     let dwellTimer: ReturnType<typeof setTimeout> | undefined;
     let glideFrame = 0;
+    let gliding = false;
 
     const isLocked = () => performance.now() < lockedUntil;
 
     const glideIntoNextSection = () => {
       const next = containerRef.current?.nextElementSibling as HTMLElement | null;
-      if (!next || window.scrollY !== lockY) return;
+      if (!next || Math.abs(window.scrollY - lockY) > SCROLL_TOLERANCE_PX) return;
+      gliding = true;
       const from = window.scrollY;
       const to = next.offsetTop;
       const startedAt = performance.now();
@@ -259,13 +277,16 @@ export default function ScrollImageSequence({
         const progress = Math.min((now - startedAt) / SHRINK_EXIT_MS, 1);
         window.scrollTo(0, from + (to - from) * easeInOutSine(progress));
         if (progress < 1) glideFrame = requestAnimationFrame(step);
+        else gliding = false;
       };
       glideFrame = requestAnimationFrame(step);
     };
 
     // The user scrolling takes over from the automatic glide
     const takeOver = () => {
-      if (!isLocked()) cancelAnimationFrame(glideFrame);
+      if (isLocked()) return;
+      cancelAnimationFrame(glideFrame);
+      gliding = false;
     };
 
     const onScroll = () => {
@@ -274,7 +295,7 @@ export default function ScrollImageSequence({
       const y = window.scrollY;
 
       if (isLocked()) {
-        if (y !== lockY) window.scrollTo(0, lockY);
+        if (Math.abs(y - lockY) > SCROLL_TOLERANCE_PX) window.scrollTo(0, lockY);
         return;
       }
 
@@ -294,8 +315,10 @@ export default function ScrollImageSequence({
       }
     };
 
+    // Scrolling down while it glides down (e.g. leftover wheel momentum) just rides along; any other input takes over
     const block = (event: Event) => {
-      if (isLocked()) event.preventDefault();
+      const alongGlide = gliding && event instanceof WheelEvent && event.deltaY > 0;
+      if (isLocked() || alongGlide) event.preventDefault();
       else takeOver();
     };
     const blockKeys = (event: KeyboardEvent) => {
@@ -343,6 +366,24 @@ export default function ScrollImageSequence({
 
 
 
+  // Minimum loader time, measured from mount
+  useEffect(() => {
+    const startedAt = performance.now();
+    const timer = setInterval(() => {
+      const share = Math.min(100, ((performance.now() - startedAt) / MIN_LOADING_MS) * 100);
+      setTimeProgress(share);
+      if (share >= 100) clearInterval(timer);
+    }, 100);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Once loading is done the loader fades out, then leaves the page
+  useEffect(() => {
+    if (loading) return;
+    const timer = setTimeout(() => setLoaderMounted(false), LOADER_FADE_MS);
+    return () => clearTimeout(timer);
+  }, [loading]);
+
   // Preload first 20 frames
   useEffect(() => {
     let loaded = 0;
@@ -356,7 +397,7 @@ export default function ScrollImageSequence({
         loaded++;
         setLoadProgress(Math.round((loaded / preloadCount) * 100));
         if (loaded >= preloadCount) {
-          setLoading(false);
+          setFramesReady(true);
           showFrame(0);
         }
       };
@@ -369,7 +410,8 @@ export default function ScrollImageSequence({
     }
 
     const fallback = setTimeout(() => {
-      setLoading(false);
+      setFramesReady(true);
+      setLoadProgress(100);
       showFrame(0);
     }, 3000);
 
@@ -382,7 +424,7 @@ export default function ScrollImageSequence({
       className={`relative ${className ?? ''}`}
       style={{ height: `${scrollHeight + shrinkHeight}vh` }}
     >
-      <div ref={stageRef} data-nav-light="false" className="sticky top-0 h-screen w-full overflow-hidden bg-white">
+      <div ref={stageRef} data-nav-light="false" className="sticky top-0 h-screen w-full overflow-hidden bg-[#F7F6F1]">
         {/* Everything below except the loader and arrow shrinks together */}
         <div ref={scalerRef} className="absolute inset-0 will-change-transform">
         {/* Layer 1: Video frames */}
@@ -466,6 +508,13 @@ export default function ScrollImageSequence({
         </div>
 
 
+        {/* Layer 3.5: hero action, above the masked video so nothing in the footage covers it */}
+        {heroAction && (
+          <div ref={heroActionRef} className="pointer-events-none absolute inset-0 z-[14] will-change-transform">
+            {heroAction}
+          </div>
+        )}
+
         {/* Layer 4: wide aerial photo, fades in while the map shrinks */}
         <img
           ref={shrinkImgRef}
@@ -476,17 +525,14 @@ export default function ScrollImageSequence({
         </div>
 
         {/* Loading overlay */}
-        {loading && (
-          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black text-white">
-            <div className="mb-4 h-1 w-48 overflow-hidden rounded-full bg-zinc-800">
-              <div
-                className="h-full rounded-full bg-white transition-all duration-300"
-                style={{ width: `${loadProgress}%` }}
-              />
-            </div>
-            <span className="text-sm text-zinc-400">
-              {loadProgress > 0 ? `Loading… ${loadProgress}%` : 'Preparing frames…'}
-            </span>
+        {loaderMounted && (
+          <div
+            className={`absolute inset-0 z-30 flex items-center justify-center bg-[radial-gradient(ellipse_at_center,#34403B_0%,#2C322F_45%,#1F2422_100%)] transition-opacity ease-out ${
+              loading ? 'opacity-100' : 'pointer-events-none opacity-0'
+            }`}
+            style={{ transitionDuration: `${LOADER_FADE_MS}ms` }}
+          >
+            <WellLoader label={loadProgress > 0 ? '載入影像' : '準備中'} progress={shownProgress} />
           </div>
         )}
 

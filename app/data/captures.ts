@@ -7,10 +7,15 @@ export interface Capture {
 }
 
 export const CAPTURES: Capture[] = [
+  { id: 'c-2013-04-18', capturedAt: '2013-04-18 10:30' },
+  { id: 'c-2014-09-25', capturedAt: '2014-09-25 14:15' },
   { id: 'c-2015-06-02', capturedAt: '2015-06-02 10:20' },
+  { id: 'c-2016-12-07', capturedAt: '2016-12-07 11:40' },
   { id: 'c-2017-11-20', capturedAt: '2017-11-20 09:45' },
   { id: 'c-2019-03-14', capturedAt: '2019-03-14 13:10' },
+  { id: 'c-2020-07-22', capturedAt: '2020-07-22 15:05' },
   { id: 'c-2021-08-09', capturedAt: '2021-08-09 11:05' },
+  { id: 'c-2022-05-16', capturedAt: '2022-05-16 09:50' },
   { id: 'c-2023-10-11-am', capturedAt: '2023-10-11 09:05' },
   { id: 'c-2023-10-11-pm', capturedAt: '2023-10-11 14:30' },
   { id: 'c-2024-05-30', capturedAt: '2024-05-30 10:40' },

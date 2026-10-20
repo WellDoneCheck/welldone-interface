@@ -20,6 +20,8 @@ type View = 'login' | 'user' | 'password' | 'users';
 interface LoginPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  // why the user is asked to log in (e.g. an action that needs it), shown above the login form
+  notice?: string;
   isLoggedIn?: boolean;
   userInfo?: UserInfo | null;
   onLogin?: (user: UserInfo) => void;
@@ -51,7 +53,7 @@ const PANEL_STAGE: FitStage = {
 // Slanted left edge shared by every panel view (Figma: 118px slant on a 1004px-wide panel)
 const PANEL_CLIP = 'polygon(11.74% 0, 100% 0, 100% 100%, 0 100%)';
 
-export default function LoginPanel({ isOpen, onClose, isLoggedIn = false, userInfo = null, onLogin, onLogout }: LoginPanelProps) {
+export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false, userInfo = null, onLogin, onLogout }: LoginPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const scale = useFitScale(PANEL_STAGE);
   const panelContentStyle = {
@@ -146,7 +148,8 @@ export default function LoginPanel({ isOpen, onClose, isLoggedIn = false, userIn
   }, [view, switchView, onClose]);
 
   const isAccountSubPage = view === 'password' || view === 'users';
-  const panelMaxW = view === 'login' ? 'max-w-[52.3%]' : 'max-w-[48.6%]';
+  // user management has a table, so its panel is wider than the other account pages
+  const panelMaxW = view === 'login' ? 'max-w-[52.3%]' : view === 'users' ? 'max-w-[72%]' : 'max-w-[48.6%]';
   const contentPadding = view === 'login'
     ? { paddingLeft: '23.3%', paddingRight: '15.4%' }
     : { paddingLeft: '11.74%', paddingRight: '3.2%' };
@@ -233,6 +236,15 @@ export default function LoginPanel({ isOpen, onClose, isLoggedIn = false, userIn
           style={contentPadding}
         >
           <div className={`w-full flex flex-col items-center transition-all duration-200 ease-in-out ${contentOpacity}`} style={panelContentStyle}>
+
+            {view === 'login' && notice && (
+              <p
+                role="status"
+                className="mb-[28px] w-full max-w-[calc(615px*var(--col))] border-l-4 border-[#62A4A7] bg-[#D1E6E7] px-5 py-3 fs-20 font-bold text-[#3F7A7E]"
+              >
+                {notice}
+              </p>
+            )}
 
             {/* ===== Login Form ===== */}
             {view === 'login' && (

@@ -1,6 +1,9 @@
 'use client';
 
 import { useRef, useEffect } from 'react';
+import Link from 'next/link';
+import SharedTransition, { ONLY_TO_MONITOR, SHARED, TO_MONITOR } from './SharedTransition';
+import { RECOGNITION_ACCURACY, WELL_TOTALS } from '../data/monitor';
 
 export default function FloatingGrid() {
   const sectionRef = useRef<HTMLDivElement>(null);
@@ -13,10 +16,13 @@ export default function FloatingGrid() {
     ease: 0.08,
   });
 
+  // The columns ease after the scroll position: a frame loop that runs while they are still catching up, started again by
+  // scrolling (and resizing), not one left running on every frame of the page
   useEffect(() => {
-    let requestID: number;
+    let requestID: number | null = null;
 
     const update = () => {
+      requestID = null;
       const section = sectionRef.current;
       if (!section) return;
 
@@ -28,9 +34,9 @@ export default function FloatingGrid() {
         scrollData.current.target = 0;
       }
 
-      // Lerp
-      scrollData.current.current += 
-        (scrollData.current.target - scrollData.current.current) * scrollData.current.ease;
+      // Lerp, until it is within a tenth of a pixel of the target
+      const gap = scrollData.current.target - scrollData.current.current;
+      scrollData.current.current = Math.abs(gap) < 0.1 ? scrollData.current.target : scrollData.current.current + gap * scrollData.current.ease;
 
       const delta = scrollData.current.current;
 
@@ -41,11 +47,21 @@ export default function FloatingGrid() {
         rightColRef.current.style.transform = `translate3d(0, -${delta * 0.8}px, 0)`;
       }
 
-      requestID = requestAnimationFrame(update);
+      if (delta !== scrollData.current.target) requestID = requestAnimationFrame(update);
     };
 
-    requestID = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(requestID);
+    const wake = () => {
+      if (requestID === null) requestID = requestAnimationFrame(update);
+    };
+
+    wake();
+    window.addEventListener('scroll', wake, { passive: true });
+    window.addEventListener('resize', wake);
+    return () => {
+      if (requestID !== null) cancelAnimationFrame(requestID);
+      window.removeEventListener('scroll', wake);
+      window.removeEventListener('resize', wake);
+    };
   }, []);
 
   const IMAGES = [
@@ -60,20 +76,42 @@ export default function FloatingGrid() {
   return (
     <section 
       ref={sectionRef} 
-      className="relative w-full h-[250vh] bg-white text-black"
+      className="relative w-full h-[250vh] bg-[#F7F6F1] text-black"
       data-section="kove"
       style={{ zIndex: 5 }}
     >
       <div className="sticky top-0 h-screen w-full flex overflow-hidden">
         
-        <div className="w-1/2 h-full flex flex-col justify-center px-12 md:px-24 bg-white">
-          <h2 className="font-serif text-[12vw] italic leading-[0.8] tracking-tighter">
-            Kove
-          </h2>
-          <div className="mt-8 max-w-xs border-l-2 border-black/10 pl-6">
-            <p className="text-[10px] uppercase tracking-[0.3em] leading-relaxed opacity-50">
-              Independent Scroll / Layered Motion
-            </p>
+        <div className="w-1/2 h-full flex flex-col justify-center px-12 md:px-24 bg-[#F7F6F1]">
+          {/* the recognition accuracy, from the same figures as the monitor page */}
+          <div style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
+            <p className="text-xs font-bold uppercase tracking-[0.35em] text-[#3F7A7E]">AI Well Detection</p>
+            <h2 className="mt-4 text-[10vw] font-black leading-[0.85] tracking-tight text-[#2C322F]">
+              {/* flies into the monitor page's accuracy card; hugging the figure so it lands at its size there */}
+              <SharedTransition name={SHARED.recognitionAccuracy} share={ONLY_TO_MONITOR}>
+                <span className="inline-block">
+                  {RECOGNITION_ACCURACY}
+                  <span className="text-[0.42em] text-[#62A4A7]">%</span>
+                </span>
+              </SharedTransition>
+            </h2>
+            <p className="mt-4 text-[clamp(18px,1.7vw,30px)] font-bold text-[#2C322F]">水井辨識準確率</p>
+            <div className="mt-8 max-w-sm border-l-2 border-[#62A4A7]/50 pl-6">
+              <p className="text-[10px] uppercase tracking-[0.3em] leading-relaxed text-[#2C322F]/50">Aerial Imagery / Deep Learning</p>
+              <p className="mt-3 text-sm leading-relaxed text-[#6F7468]">
+                從空拍影像自動找出水井，已驗證 {WELL_TOTALS.verified.toLocaleString()} 口、待驗證 {WELL_TOTALS.pending} 口，加速合法水井的登記與清查。
+              </p>
+            </div>
+            <Link
+              href="/monitor"
+              transitionTypes={TO_MONITOR}
+              className="group mt-10 inline-flex items-center gap-4 bg-[#62A4A7] px-8 py-4 text-[clamp(18px,1.4vw,24px)] font-bold tracking-[0.04em] text-white shadow-[8px_8px_40px_rgba(0,0,0,0.18)] outline-none transition-[translate,filter] duration-500 ease-[var(--ease-expo)] hover:-translate-y-1.5 hover:brightness-110 motion-reduce:transition-none focus-visible:shadow-[0_0_0_4px_#D1E6E7]"
+            >
+              監控總覽
+              <span aria-hidden className="transition-transform duration-500 ease-[var(--ease-expo)] group-hover:translate-x-1 motion-reduce:transition-none">
+                →
+              </span>
+            </Link>
           </div>
         </div>
 

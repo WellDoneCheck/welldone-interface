@@ -1,8 +1,10 @@
 'use client';
 
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import type { UserInfo } from './LoginPanel';
+import { lastVisitHref, subscribeToVisits, type VisitedPage } from '../utils/lastVisit';
+import { logoBackdropIsLight, subscribeToLogoBackdrop } from '../utils/logoBackdrop';
 
 interface NavbarProps {
   onLoginOpen: () => void;
@@ -12,16 +14,29 @@ interface NavbarProps {
   userInfo?: UserInfo | null;
 }
 
-const NAV_ITEMS = ['水井辨識', '地圖檢視', '匯入', '匯出', '歷史紀錄', '監控總覽', '帳號管理'];
-const NAV_ROUTES: Record<string, string> = {
-  '水井辨識': '/',
-  '地圖檢視': '/map',
-  '匯入': '/upload',
-  '匯出': '/',
-  '歷史紀錄': '/',
-  '監控總覽': '/monitor',
-  '帳號管理': '/',
-};
+interface NavLink {
+  label: string;
+  href: string;
+  // shown only once the page has been visited, so it animates in when it turns up (see nav-item-in in globals.css)
+  remembered: boolean;
+}
+
+const REMEMBERED_ITEM_ENTER = 'overflow-hidden animate-[nav-item-in_700ms_var(--ease-expo)_backwards] motion-reduce:animate-none';
+
+// Each item is named after the page it opens (the account lives in the login panel, the upload records on 影像匯入與紀錄).
+// 地圖檢視 and 水井檢查 go back to the map record / the well opened last, and are left out until there is one.
+const NAV_ITEMS: { label: string; href?: string; lastVisit?: VisitedPage }[] = [
+  // { label: '首頁', href: '/' },
+  { label: '影像匯入與紀錄', href: '/upload' },
+  { label: '地圖檢視', lastVisit: 'map' },
+  { label: '水井檢查', lastVisit: 'check' },
+  { label: '監控總覽', href: '/monitor' },
+];
+
+// Where the user last was on that page, or null (also on the server and during hydration)
+function useLastVisitHref(page: VisitedPage): string | null {
+  return useSyncExternalStore(subscribeToVisits, () => lastVisitHref(page), () => null);
+}
 
 export default function Navbar({
   onLoginOpen,
@@ -36,6 +51,13 @@ export default function Navbar({
   const [inKove, setInKove] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const lastVisits: Record<VisitedPage, string | null> = { map: useLastVisitHref('map'), check: useLastVisitHref('check') };
+  // a map behind the logo says whether it is light there (TileMap); otherwise the word follows the rest of the navbar
+  const logoOnLight = useSyncExternalStore(subscribeToLogoBackdrop, logoBackdropIsLight, () => null) ?? inKove;
+  const navLinks: NavLink[] = NAV_ITEMS.flatMap(({ label, href, lastVisit }) => {
+    const target = lastVisit ? lastVisits[lastVisit] : href;
+    return target ? [{ label, href: target, remembered: lastVisit !== undefined }] : [];
+  });
 
   const handleLogoClick = useCallback(() => {
     if (pathname === '/') {
@@ -96,7 +118,7 @@ export default function Navbar({
 
   return (
     <nav
-      className={`fixed top-0 inset-x-0 z-50 px-8 md:px-20 transition-all duration-500 ${style.navBg} ${
+      className={`fixed top-0 inset-x-0 z-50 [view-transition-name:site-navbar] px-8 md:px-20 transition-all duration-500 ${style.navBg} ${
         heroAnimating ? 'opacity-0 -translate-y-full pointer-events-none' : 'opacity-100 translate-y-0'
       }`}
     >
@@ -109,27 +131,28 @@ export default function Navbar({
             style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}
           >
             <span className="text-[#62A4A7]">Sky</span>
-            <span className={inKove ? 'text-gray-900' : 'text-white'}>Well</span>
+            <span data-nav-logo-word className={`transition-colors duration-500 ${logoOnLight ? 'text-gray-900' : 'text-white'}`}>
+              Well
+            </span>
           </span>
         </button>
 
-        {/* Desktop nav links — only when logged in */}
+        {/* Desktop nav links — only when logged in; the gap is a variable so an item turning up can grow its gap in with it */}
         {isLoggedIn && (
-          <div className="hidden md:flex items-center gap-12">
-            {NAV_ITEMS.map((item) => (
+          <div className="hidden lg:flex items-center gap-[var(--nav-gap)] [--nav-gap:1rem] xl:[--nav-gap:3rem]">
+            {navLinks.map((link) => (
               <a
-                key={item}
-                href={NAV_ROUTES[item] || '#'}
+                key={link.label}
+                href={link.href}
                 onClick={(e) => {
                   e.preventDefault();
-                  const route = NAV_ROUTES[item];
-                  if (route) router.push(route);
+                  router.push(link.href);
                 }}
-                className={`text-2xl font-semibold transition-all duration-500 ${style.linkColor} ${
+                className={`whitespace-nowrap text-base font-semibold transition-all duration-500 xl:text-2xl ${style.linkColor} ${
                   contentFaded ? 'opacity-0 translate-y-[-8px]' : 'opacity-100 translate-y-0'
-                }`}
+                } ${link.remembered ? REMEMBERED_ITEM_ENTER : ''}`}
               >
-                {item}
+                {link.label}
               </a>
             ))}
           </div>
@@ -167,7 +190,7 @@ export default function Navbar({
           <button
             type="button"
             onClick={() => setMobileOpen((v) => !v)}
-            className="flex md:hidden flex-col justify-center items-center w-9 h-9 gap-1.5"
+            className="flex lg:hidden flex-col justify-center items-center w-9 h-9 gap-1.5"
             aria-label="選單"
           >
             <span
@@ -192,24 +215,23 @@ export default function Navbar({
       {/* Mobile menu drawer */}
       <div
         ref={menuRef}
-        className={`md:hidden overflow-hidden transition-all duration-400 ease-[cubic-bezier(0.22,1,0.36,1)] ${
+        className={`lg:hidden overflow-hidden transition-all duration-400 ease-[cubic-bezier(0.22,1,0.36,1)] ${
           mobileOpen ? 'max-h-[400px] opacity-100' : 'max-h-0 opacity-0'
         }`}
       >
         <div className="px-6 pb-6 pt-2 space-y-1 bg-black/70 backdrop-blur-md">
-          {isLoggedIn && NAV_ITEMS.map((item) => (
+          {isLoggedIn && navLinks.map((link) => (
             <a
-              key={item}
-              href={NAV_ROUTES[item] || '#'}
+              key={link.label}
+              href={link.href}
               onClick={(e) => {
                 e.preventDefault();
                 setMobileOpen(false);
-                const route = NAV_ROUTES[item];
-                if (route) router.push(route);
+                router.push(link.href);
               }}
               className="block rounded-lg px-4 py-3 text-lg font-medium text-white/90 hover:bg-white/10 hover:text-white transition-colors"
             >
-              {item}
+              {link.label}
             </a>
           ))}
         </div>

@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
+import { Suspense } from 'react';
 import { Geist, Geist_Mono, Noto_Serif_TC } from 'next/font/google';
 import './globals.css';
 import SiteChrome from './components/SiteChrome';
+import PageLoading from './components/PageLoading';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -28,23 +30,34 @@ export const metadata: Metadata = {
 
 export default function RootLayout({
   children,
+  modal,
 }: Readonly<{
   children: React.ReactNode;
+  // sheets opened over the current page, e.g. the export page (see app/@modal)
+  modal: React.ReactNode;
 }>) {
   return (
     <html
       lang="en"
+      // Browsers and extensions (e.g. Zen's --zen-logo-path) add attributes to <html> before hydration
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} ${notoSerifTC.variable} h-full antialiased`}
     >
       <head>
         <script
           dangerouslySetInnerHTML={{
-            __html: `history.scrollRestoration = 'manual'; window.scrollTo(0, 0);`,
+            __html: 'history.scrollRestoration = "manual"; window.scrollTo(0, 0);',
           }}
         />
       </head>
       <body className="min-h-full flex flex-col">
-        <SiteChrome>{children}</SiteChrome>
+        <SiteChrome>
+          {/* Already on screen when navigating, so a page whose code is still loading keeps the current page up (and its
+              view transition) instead of switching to the loading screen; per-page boundaries or app/loading.tsx
+              would be new on every navigation and show it */}
+          <Suspense fallback={<PageLoading />}>{children}</Suspense>
+          {modal}
+        </SiteChrome>
       </body>
     </html>
   );
