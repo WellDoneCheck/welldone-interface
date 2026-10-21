@@ -1,7 +1,7 @@
 // The monitor page's live state and how it changes from one update to the next. Simulated until the backend sends
 // real figures: each update nudges the services' load, moves the running batch on, and logs what happened as events.
 import { EVENTS, SERVICES, TASKS, WELL_TOTALS, type Level, type MonitorTask, type WellStatus } from '../data/monitor';
-import { importName } from '../data/mapRecords';
+import { givenName, importName, type RecordStatus, type TaskRecord } from './tasks';
 
 export const REFRESH_MS = 5000;
 // CPU readings kept per service for its trend line
@@ -79,6 +79,30 @@ export function createSnapshot(now: number): MonitorSnapshot {
   };
 }
 
+/* ─── Real batches ────────────────────────────────────────────── */
+
+const STATE_OF: Record<RecordStatus, LiveTask['state']> = { waiting: 'queued', cutting: 'running', recognizing: 'running', done: 'done', failed: 'failed' };
+
+// An imported map from the backend as a batch: its tiles as the images, its stage's label as why it failed; no pace
+// (rate 0) nor wells found, which the backend does not tell
+export function liveTask(record: TaskRecord): LiveTask {
+  return {
+    id: record.id,
+    name: givenName(record.name) || undefined,
+    state: STATE_OF[record.status],
+    createdAt: Date.parse(record.createdAt),
+    images: record.tiles?.total ?? 0,
+    processed: record.tiles?.done ?? 0,
+    rate: 0,
+    error: record.status === 'failed' ? record.statusLabel : undefined,
+  };
+}
+
+// What the page shows once logged in: the real batches, and only the simulated events not about a simulated batch
+export function withRealTasks(snapshot: MonitorSnapshot, tasks: LiveTask[]): MonitorSnapshot {
+  return { ...snapshot, tasks, events: snapshot.events.filter((event) => !event.task) };
+}
+
 /* ─── Names ─────────────────────────────────────────────────────── */
 
 const pad = (value: number) => String(value).padStart(2, '0');
@@ -90,15 +114,6 @@ export function defaultTaskName(createdAt: number): string {
 }
 
 export const taskName = (task: LiveTask) => task.name ?? defaultTaskName(task.createdAt);
-
-// A blank name goes back to the default one
-export function renameTask(snapshot: MonitorSnapshot, id: string, name: string): MonitorSnapshot {
-  const trimmed = name.trim();
-  return {
-    ...snapshot,
-    tasks: snapshot.tasks.map((task) => (task.id === id ? { ...task, name: trimmed || undefined } : task)),
-  };
-}
 
 // '批次完成：嘉義沿海測繪', with the batch's current name when it is still listed
 export function eventTitle(event: LiveEvent, tasks: LiveTask[]): string {

@@ -7,7 +7,15 @@ import { useSiteChrome } from './SiteChrome';
 import { EventsPanel, LockedPanel, ServicesPanel, StatTiles, StatusBar, TasksPanel, TrendPanel } from './MonitorCards';
 import { useFitScale, type FitStage } from './useFitScale';
 import { useLiveMonitor } from './useLiveMonitor';
-import { MARKERS, type WellStatus } from '../data/monitor';
+import { useMonitorStats } from './useMonitorStats';
+import { useTaskRecords } from './useTaskRecords';
+import { useMapView } from './useMapView';
+import { useWellVerdicts } from './useWellVerdicts';
+import type { WellStatus } from '../data/monitor';
+import { liveTask, withRealTasks } from '../utils/monitorLive';
+import { monitorFigures, wellMarker } from '../utils/monitorStats';
+import { canRename } from '../utils/tasks';
+import { verdictOf } from '../utils/wellVerdicts';
 
 // Laid out like the Figma frame: panels from x=80 to x=1840, 848px tall, below the 120px navbar; scaled to the viewport.
 // A status bar on top; below it the figures, the work in progress and the map side by side.
@@ -20,12 +28,25 @@ export default function MonitorPage() {
   const scale = useFitScale(STAGE);
   // anyone sees the summary, the services, the tasks and the map; the events, renaming a task and each well's details
   // are for logged-in users
-  const { isLoggedIn, requireLogin } = useSiteChrome();
+  const { isLoggedIn, requireLogin, session } = useSiteChrome();
   const logIn = () => requireLogin(() => {});
-  const { snapshot, paused, togglePaused, renameTask, cycle } = useLiveMonitor();
+  const live = useLiveMonitor();
+  const { paused, togglePaused, cycle } = live;
+  // once logged in the well figures and the batches (the imported maps) come from the backend; the services and the
+  // other events stay simulated
+  const stats = monitorFigures(useMonitorStats(paused), live.snapshot.totals);
+  const realTasks = useTaskRecords(isLoggedIn);
+  const snapshot = isLoggedIn ? withRealTasks(live.snapshot, realTasks.records.map(liveTask)) : live.snapshot;
+  const renameTask = session && canRename(session.role) ? realTasks.rename : undefined;
   const [filter, setFilter] = useState<WellStatus | null>(null);
-  // Start on a well that needs attention
-  const [selectedId, setSelectedId] = useState(() => (MARKERS.find((marker) => marker.status === 'pending') ?? MARKERS[0]).recordId);
+  // the newest finished map's wells on the map, once logged in
+  const latest = useMapView(null);
+  const view = latest?.status === 'ready' ? latest.value : null;
+  const verdicts = useWellVerdicts();
+  const markers = (view?.wells ?? []).map((well) => wellMarker(well, verdictOf(well, verdicts)));
+  // a well picked on the map; until then one that needs attention
+  const [pickedId, setSelectedId] = useState<string | null>(null);
+  const selectedId = pickedId ?? (markers.find((marker) => marker.status === 'pending') ?? markers[0])?.recordId ?? '';
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#2C322F]" style={{ fontFamily: 'var(--font-geist-sans), sans-serif' }}>
@@ -41,13 +62,13 @@ export default function MonitorPage() {
 
           <div className="flex min-h-0 flex-1 gap-4">
             <div className="flex w-[560px] shrink-0 flex-col gap-4">
-              <StatTiles totals={snapshot.totals} />
-              <TrendPanel />
+              <StatTiles stats={stats} />
+              <TrendPanel trend={stats.trend} />
               <ServicesPanel services={snapshot.services} />
             </div>
 
             <div className="flex w-[540px] shrink-0 flex-col gap-4">
-              <TasksPanel tasks={snapshot.tasks} now={snapshot.now} onRename={isLoggedIn ? renameTask : undefined} />
+              <TasksPanel tasks={snapshot.tasks} now={snapshot.now} onRename={renameTask} />
               {isLoggedIn ? (
                 <EventsPanel events={snapshot.events} tasks={snapshot.tasks} now={snapshot.now} />
               ) : (
@@ -56,8 +77,9 @@ export default function MonitorPage() {
             </div>
 
             <MonitorMap
-              markers={MARKERS}
-              totals={snapshot.totals}
+              imagery={view?.imagery ?? null}
+              markers={markers}
+              totals={stats.wells}
               filter={filter}
               onFilterChange={setFilter}
               selectedId={selectedId}

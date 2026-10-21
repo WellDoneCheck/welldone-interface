@@ -1,5 +1,5 @@
-// Monitor dashboard data. Placeholder until it comes from the backend.
-import { getLatestFinishedRecord, wellsOf } from './mapRecords';
+// Monitor dashboard data. Placeholder until it comes from the backend; the well figures and markers do, once logged
+// in (utils/monitorStats.ts), these stand in for them until then.
 
 /* ─── Wells ─────────────────────────────────────────────────────── */
 
@@ -31,37 +31,15 @@ export const RECOGNITION_ACCURACY = 97.3;
 export const VERIFIED_THIS_WEEK = 37;
 
 export interface WellMarker {
+  // the well's code, as /check?record= takes it
   recordId: string;
   coordinates: string;
   latitude: number;
   longitude: number;
   status: WellStatus;
-  confidence: number;
+  // %; null for a well added by hand
+  confidence: number | null;
 }
-
-// Status and confidence of each monitored well
-const MARKER_STATES: Pick<WellMarker, 'status' | 'confidence'>[] = [
-  { status: 'pending', confidence: 94.2 },
-  { status: 'verified', confidence: 98.6 },
-  { status: 'verified', confidence: 97.1 },
-  { status: 'rejected', confidence: 41.5 },
-  { status: 'verified', confidence: 99.0 },
-  { status: 'pending', confidence: 88.7 },
-  { status: 'verified', confidence: 96.4 },
-  { status: 'verified', confidence: 95.9 },
-  { status: 'pending', confidence: 91.3 },
-  { status: 'verified', confidence: 98.2 },
-  { status: 'rejected', confidence: 37.8 },
-  { status: 'verified', confidence: 97.7 },
-];
-
-// One marker per state above, on wells of the newest finished map taken evenly through it, so a marker can lead
-// straight to that well's verification page (recordId: the well's id, as /check?record= takes it)
-const MONITORED_WELLS = wellsOf(getLatestFinishedRecord().id);
-export const MARKERS: WellMarker[] = MARKER_STATES.map((state, index) => {
-  const well = MONITORED_WELLS[Math.floor((index * MONITORED_WELLS.length) / MARKER_STATES.length)];
-  return { recordId: well.id, coordinates: well.coordinates, latitude: well.latitude, longitude: well.longitude, ...state };
-});
 
 /* ─── Trend ─────────────────────────────────────────────────────── */
 
@@ -143,8 +121,6 @@ export interface MonitorEvent {
   minutesAgo: number;
 }
 
-const LOW_CONFIDENCE_WELL = MARKERS.find((marker) => marker.status === 'pending') ?? MARKERS[0];
-
 // Newest first
 export const EVENTS: MonitorEvent[] = [
   { id: 'event-5', level: 'info', title: '新批次排入', taskId: 'task-219', detail: '860 張空拍影像', href: '/upload', minutesAgo: 6 },
@@ -154,9 +130,9 @@ export const EVENTS: MonitorEvent[] = [
   {
     id: 'event-1',
     level: 'warning',
-    title: `辨識信賴度偏低：${LOW_CONFIDENCE_WELL.recordId}`,
-    detail: `信賴度 ${LOW_CONFIDENCE_WELL.confidence}%，建議人工確認`,
-    href: `/check?record=${LOW_CONFIDENCE_WELL.recordId}`,
+    title: '辨識信賴度偏低',
+    detail: '信賴度 88.7%，建議人工確認',
+    href: '/check',
     minutesAgo: 180,
   },
 ];
