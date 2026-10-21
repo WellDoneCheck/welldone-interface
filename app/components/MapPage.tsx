@@ -7,8 +7,12 @@ import ModelRender from './ModelRender';
 import ExportEntry from './ExportEntry';
 import CompareEntry from './CompareEntry';
 import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent, MapMouseEvent } from 'maplibre-gl';
-import { drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapLayer, useMapProject, type Icon, type Project } from './TileMap';
+import { drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapLayer, useMapProject, type Bounds, type Icon, type Project } from './TileMap';
 import { useSurveyMap } from './SurveyMap';
+import { TILE_COLOR, useTileProgressLayer } from './useTileProgressLayer';
+import { useRecognisedWells } from './useRecognisedWells';
+import { useCutImagery } from './useCutImagery';
+import type { TileState } from '../utils/tileProgress';
 import { pinScaleExpression, pinZoomScale } from '../utils/pinZoomScale';
 import { lastMapZoom, mapCameraFor, mapImageFor, projectWithCamera, rememberMapCamera, rememberMapImage, type MapCamera } from '../utils/mapCamera';
 import SharedTransition, {
@@ -197,6 +201,8 @@ interface MapCanvasProps {
   // the wells of the imported map shown, one pin each, over its imagery (null: not cut yet)
   wells: MapWell[];
   imagery: Imagery | null;
+  // the whole image, shown while its imagery cannot be yet (null: not known either)
+  area: Bounds | null;
   // null while no well is selected
   selected: MapWell | null;
   cardOpen: boolean;
@@ -217,7 +223,7 @@ interface MapCanvasProps {
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, imagery, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -229,8 +235,8 @@ function MapCanvas({ wells, imagery, selected, cardOpen, startsWithCard, startCa
 
   const map = useSurveyMap({
     imagery,
-    // the whole imagery; while there is none yet (not cut), Taiwan
-    fit: stripFit(imagery?.bounds ?? TAIWAN_BOUNDS, viewport, startsWithCard),
+    // the whole imagery; while there is none yet the area it is being cut from, or Taiwan
+    fit: stripFit(imagery?.bounds ?? area ?? TAIWAN_BOUNDS, viewport, startsWithCard),
     camera,
     // a picture of where the map is left with a well, for coming back to it from its check page
     onRestImage: selectedId ? (image) => rememberMapImage(selectedId, image) : undefined,
@@ -419,6 +425,23 @@ const LEGEND: { look: VerdictLook; label: string }[] = [
   { look: 'not-well', label: '已驗證：不是井' },
 ];
 
+// The tiles not cut yet while the map is cut, then those the AI has still to recognise
+const TILE_LEGEND: { state: TileState; label: string }[] = [
+  { state: 'uncut', label: '尚未切圖' },
+  { state: 'processing', label: '辨識中' },
+  { state: 'failed', label: '失敗' },
+  { state: 'pending', label: '等待辨識' },
+];
+
+function TileSwatch({ state }: { state: TileState }) {
+  return (
+    <span
+      className={`h-[26px] w-[26px] shrink-0 border-2 ${state === 'processing' ? 'animate-pulse motion-reduce:animate-none' : ''}`}
+      style={{ borderColor: TILE_COLOR[state], backgroundColor: `${TILE_COLOR[state]}${state === 'pending' || state === 'uncut' ? '2E' : '73'}` }}
+    />
+  );
+}
+
 // The compare page's stage, whose scale its corners (the export shortcut, the legend) are drawn at: this page's corners
 // are the same size, so moving between the two pages they stay put
 const CORNER_STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY: 0, minViewportWidth: 0 };
@@ -426,7 +449,8 @@ const CORNER_STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY:
 // What the pins' colours mean, in the corner the card covers: shown while no card is, fading out as one opens and back
 // in as it closes. Where and as large as the compare page's legend: against the navbar's right edge, just above the
 // window's bottom.
-function MapLegend({ hidden }: { hidden: boolean }) {
+// tiles: how many of the map's tiles are drawn in each state (null while none are)
+function MapLegend({ hidden, tiles }: { hidden: boolean; tiles: Record<TileState, number> | null }) {
   const scale = useFitScale(CORNER_STAGE);
   return (
     <div
@@ -442,6 +466,18 @@ function MapLegend({ hidden }: { hidden: boolean }) {
             {entry.label}
           </span>
         ))}
+        {tiles && (
+          <>
+            <span className="mt-[8px] text-[18px] font-bold text-[#6F7468]">小圖進度</span>
+            {TILE_LEGEND.filter((entry) => tiles[entry.state] > 0).map((entry) => (
+              <span key={entry.state} className="flex items-center gap-[12px] text-[21px] font-bold text-[#2C322F]">
+                <TileSwatch state={entry.state} />
+                {entry.label}
+                <span className="ml-auto pl-[12px] tabular-nums text-[#6F7468]">{tiles[entry.state]}</span>
+              </span>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -688,7 +724,7 @@ interface MapPageProps {
   cardOpenAtStart: boolean;
 }
 
-export default function MapPage({ mapFile, wells, imagery, well: initialWell, openCardOnArrival, cardOpenAtStart }: MapPageProps) {
+export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrivedImagery, well: initialWell, openCardOnArrival, cardOpenAtStart }: MapPageProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('aerial');
   const [cardOpen, setCardOpen] = useState(cardOpenAtStart);
   const [selectedId, setSelectedId] = useState(initialWell?.id ?? null);
@@ -700,7 +736,6 @@ export default function MapPage({ mapFile, wells, imagery, well: initialWell, op
     setArrivedAt(arrival);
     setSelectedId(initialWell?.id ?? null);
   }
-  const record = wells.find((candidate) => candidate.id === selectedId) ?? null;
   // fixed as the page arrives: selecting a pin writes &well= into the address, which would otherwise read as
   // arriving with a card and fit the whole strip again, undoing the pin's zoom
   const [startsWithCard] = useState(openCardOnArrival || cardOpenAtStart);
@@ -715,6 +750,12 @@ export default function MapPage({ mapFile, wells, imagery, well: initialWell, op
   const scale = useFitScale(OVERLAY_STAGE);
   const cornerScale = useFitScale(CORNER_STAGE);
   const [map, setMap] = useState<MapLibreMap | null>(null);
+  // how far this map has got, tile by tile, and its wells read again as the AI recognises more of them
+  const tiles = useTileProgressLayer(map, mapFile.id);
+  const wells = useRecognisedWells(mapFile, arrivedWells, tiles.recognised);
+  // the AI starts once the map is cut, so its count is known only then; until then the imagery cut so far
+  const imagery = useCutImagery(mapFile.id, arrivedImagery, tiles.recognised !== null) ?? tiles.imagery;
+  const record = wells.find((candidate) => candidate.id === selectedId) ?? null;
 
   // the navbar's 地圖檢視 comes back to the map shown last
   useEffect(() => rememberVisit('map', mapFile.id), [mapFile.id]);
@@ -755,6 +796,7 @@ export default function MapPage({ mapFile, wells, imagery, well: initialWell, op
       <MapCanvas
         wells={wells}
         imagery={imagery}
+        area={tiles.bounds}
         selected={record}
         cardOpen={cardOpen}
         startsWithCard={startsWithCard}
@@ -776,12 +818,12 @@ export default function MapPage({ mapFile, wells, imagery, well: initialWell, op
       {/* in the bottom left corner, against the navbar's left edge, as on the compare page (and as large) */}
       <div className="pointer-events-auto absolute" style={{ ...pagePart('map-shortcuts'), left: PAGE_GUTTER, bottom: PAGE_GAP }}>
         <div className="flex gap-[12px]" style={{ zoom: cornerScale }}>
-          <ExportEntry recordId={mapFile.id} />
+          <ExportEntry recordId={mapFile.id} wells={wells} />
           <CompareEntry recordId={mapFile.id} />
         </div>
       </div>
 
-      <MapLegend hidden={cardOpen} />
+      <MapLegend hidden={cardOpen} tiles={tiles.counts} />
 
       <div className="pointer-events-none absolute" style={{ ...pagePart('map-card'), top: CONTENT_TOP, right: PAGE_GUTTER + TAB_OVERHANG * scale }}>
         <div
