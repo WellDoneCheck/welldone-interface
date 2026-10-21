@@ -1,13 +1,51 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accountError, countRoles, filterUsers, isLastAdmin, passwordError } from '../app/utils/users.ts';
+import {
+  accountError,
+  assignableRoles,
+  canCreateUsers,
+  canManage,
+  canManageUsers,
+  countRoles,
+  filterUsers,
+  passwordError,
+  toManagedUser,
+} from '../app/utils/users.ts';
 
-const user = (account, name, role) => ({ account, name, role, registeredAt: '2023-01-01 00:00', lastActiveAt: null });
-const USERS = [user('chen.chihyuan', '陳志遠', 'admin'), user('wu.jiaming', '吳家銘', 'user'), user('lin.meihua', '林美華', 'user')];
+const user = (account, name, role) => ({ id: account, account, name, role, registeredAt: '2023-01-01 00:00', lastActiveAt: null });
+const USERS = [
+  user('root', '', 'root'),
+  user('chen.chihyuan', '陳志遠', 'admin'),
+  user('wu.jiaming', '吳家銘', 'operator'),
+  user('lin.meihua', '林美華', 'viewer'),
+];
 
-test('filters by role', () => {
-  assert.deepEqual(filterUsers(USERS, '', 'user').map((u) => u.account), ['wu.jiaming', 'lin.meihua']);
-  assert.equal(filterUsers(USERS, '', 'all').length, 3);
+test('an account from the backend shows its times in Taipei time', () => {
+  const apiUser = {
+    id: 'uuid',
+    username: 'chen.chihyuan',
+    name: null,
+    role: 'admin',
+    is_default_password: false,
+    last_login_at: '2026-10-13T08:00:00.000Z',
+    created_at: '2022-12-21T02:20:00.000Z',
+    updated_at: '2026-10-13T08:00:00.000Z',
+  };
+  assert.deepEqual(toManagedUser(apiUser), {
+    id: 'uuid',
+    account: 'chen.chihyuan',
+    name: '',
+    role: 'admin',
+    registeredAt: '2022-12-21 10:20',
+    lastActiveAt: '2026-10-13 16:00',
+  });
+  assert.equal(toManagedUser({ ...apiUser, last_login_at: null }).lastActiveAt, null);
+});
+
+test('filters by role, root counting as an admin', () => {
+  assert.deepEqual(filterUsers(USERS, '', 'admin').map((u) => u.account), ['root', 'chen.chihyuan']);
+  assert.deepEqual(filterUsers(USERS, '', 'viewer').map((u) => u.account), ['lin.meihua']);
+  assert.equal(filterUsers(USERS, '', 'all').length, 4);
 });
 
 test('searches account and name, ignoring case and surrounding spaces', () => {
@@ -16,15 +54,31 @@ test('searches account and name, ignoring case and surrounding spaces', () => {
   assert.deepEqual(filterUsers(USERS, 'wu', 'admin'), []);
 });
 
-test('counts users per role', () => {
-  assert.deepEqual(countRoles(USERS), { all: 3, admin: 1, user: 2 });
+test('counts users per role tab', () => {
+  assert.deepEqual(countRoles(USERS), { all: 4, admin: 2, operator: 1, viewer: 1 });
 });
 
-test('protects the only admin', () => {
-  assert.equal(isLastAdmin(USERS, 'chen.chihyuan'), true);
-  assert.equal(isLastAdmin(USERS, 'wu.jiaming'), false);
-  const twoAdmins = [...USERS, user('huang.yating', '黃雅婷', 'admin')];
-  assert.equal(isLastAdmin(twoAdmins, 'chen.chihyuan'), false);
+test('only root creates accounts; root and admin manage them', () => {
+  assert.equal(canCreateUsers('root'), true);
+  assert.equal(canCreateUsers('admin'), false);
+  assert.equal(canManageUsers('admin'), true);
+  assert.equal(canManageUsers('operator'), false);
+  assert.equal(canManageUsers('viewer'), false);
+});
+
+test('nobody manages root, only root manages admins', () => {
+  assert.equal(canManage('root', 'root'), false);
+  assert.equal(canManage('admin', 'root'), false);
+  assert.equal(canManage('root', 'admin'), true);
+  assert.equal(canManage('admin', 'admin'), false);
+  assert.equal(canManage('admin', 'operator'), true);
+  assert.equal(canManage('admin', 'viewer'), true);
+  assert.equal(canManage('operator', 'viewer'), false);
+});
+
+test('only root can make someone an admin, and nobody a root', () => {
+  assert.deepEqual(assignableRoles('root'), ['admin', 'operator', 'viewer']);
+  assert.deepEqual(assignableRoles('admin'), ['operator', 'viewer']);
 });
 
 test('checks new account names', () => {

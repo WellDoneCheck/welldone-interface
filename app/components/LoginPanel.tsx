@@ -7,12 +7,12 @@ import LoginForm from './LoginForm';
 import ChangePasswordPage from './ChangePasswordPage';
 import UserManagementPage from './UserManagementPage';
 import { useFitScale, type FitStage } from './useFitScale';
-
-export type UserRole = 'admin' | 'user' | null;
+import { logIn } from '../utils/auth';
+import type { Role, Session } from '../utils/session';
 
 export interface UserInfo {
   name: string;
-  role: UserRole;
+  role: Role;
 }
 
 type View = 'login' | 'user' | 'password' | 'users';
@@ -22,10 +22,11 @@ interface LoginPanelProps {
   onClose: () => void;
   // why the user is asked to log in (e.g. an action that needs it), shown above the login form
   notice?: string;
-  isLoggedIn?: boolean;
-  userInfo?: UserInfo | null;
-  onLogin?: (user: UserInfo) => void;
-  onLogout?: () => void;
+  // null when logged out; one still on its default password is held on the change-password view
+  session: Session | null;
+  // logged in and ready to use the site (the default password changed, if it had to be)
+  onLoggedIn: () => void;
+  onLogout: () => void;
 }
 
 interface Toast {
@@ -53,7 +54,8 @@ const PANEL_STAGE: FitStage = {
 // Slanted left edge shared by every panel view (Figma: 118px slant on a 1004px-wide panel)
 const PANEL_CLIP = 'polygon(11.74% 0, 100% 0, 100% 100%, 0 100%)';
 
-export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false, userInfo = null, onLogin, onLogout }: LoginPanelProps) {
+export default function LoginPanel({ isOpen, onClose, notice, session, onLoggedIn, onLogout }: LoginPanelProps) {
+  const mustChangePassword = session?.isDefaultPassword ?? false;
   const panelRef = useRef<HTMLDivElement>(null);
   const scale = useFitScale(PANEL_STAGE);
   const panelContentStyle = {
@@ -68,6 +70,7 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [view, setView] = useState<View>('login');
   const [isTransitioning, setIsTransitioning] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const removeToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -94,7 +97,7 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
   // Close on Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape' && isOpen && !mustChangePassword) {
         if (view === 'password' || view === 'users') {
           navigateBack();
         } else {
@@ -104,7 +107,7 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isOpen, onClose, view]);
+  }, [isOpen, onClose, view, mustChangePassword]);
 
   // Reset when panel closes
   useEffect(() => {
@@ -123,12 +126,14 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
   // Sync view with login state
   useEffect(() => {
     if (!isOpen) return;
-    if (isLoggedIn && view === 'login') {
+    if (mustChangePassword) {
+      switchView('password');
+    } else if (session && view === 'login') {
       switchView('user');
-    } else if (!isLoggedIn && (view === 'user' || view === 'password' || view === 'users')) {
+    } else if (!session && view !== 'login') {
       switchView('login');
     }
-  }, [isLoggedIn, isOpen]);
+  }, [session, mustChangePassword, isOpen]);
 
   const switchView = useCallback((next: View) => {
     if (next === view) return;
@@ -171,21 +176,27 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
     return valid;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     if (!validate()) {
       addToast('error', '請填寫所有欄位');
       return;
     }
-    const simulatedUser: UserInfo = {
-      name: account,
-      role: account === 'admin' ? 'admin' : 'user',
-    };
-    onLogin?.(simulatedUser);
+    setSubmitting(true);
+    try {
+      const loggedIn = await logIn(account.trim(), password);
+      setPassword('');
+      if (loggedIn && !loggedIn.isDefaultPassword) onLoggedIn();
+    } catch (error) {
+      addToast('error', (error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleLogout = () => {
-    onLogout?.();
+    onLogout();
     setAccount('');
     setPassword('');
   };
@@ -210,17 +221,20 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
             ? `translate-x-0 ${panelMaxW}`
             : `translate-x-full ${panelMaxW}`
         }`}
-        style={{
-          background: 'var(--bg-paper)',
-          boxShadow: 'var(--shadow-float)',
-          clipPath: PANEL_CLIP,
-        }}
       >
-        {/* Left edge shadow */}
-        <div className="pointer-events-none absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/5 to-transparent" />
+        {/* The slanted paper behind the content. Only this layer, with nothing in it that animates, is clipped:
+            clipping the whole panel let Chrome repaint a tile of it unclipped (filling the slant in) whenever
+            something in the form animated. */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: 'var(--bg-paper)', boxShadow: 'var(--shadow-float)', clipPath: PANEL_CLIP }}
+        >
+          {/* Left edge shadow */}
+          <div className="absolute inset-y-0 left-0 w-16 bg-gradient-to-r from-black/5 to-transparent" />
+        </div>
 
-        {/* Close / Back button */}
-        <button
+        {/* Close / Back button: none while the default password has to be changed */}
+        {!mustChangePassword && <button
           type="button"
           onClick={navigateBack}
           className="absolute top-[calc(84px*var(--col))] right-[calc(81px*var(--col))] z-10 flex h-[30px] w-[30px] items-center justify-center hover:opacity-60 transition-opacity"
@@ -228,11 +242,11 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
           aria-label={isAccountSubPage ? '返回' : '關閉登入'}
         >
           <Image src="/admin/icon-close.svg" alt="" width={30} height={30} />
-        </button>
+        </button>}
 
         {/* Content wrapper with crossfade transition */}
         <div
-          className="flex h-full flex-col items-center justify-center overflow-y-auto pr-12"
+          className="relative flex h-full flex-col items-center justify-center overflow-y-auto pr-12"
           style={contentPadding}
         >
           <div className={`w-full flex flex-col items-center transition-all duration-200 ease-in-out ${contentOpacity}`} style={panelContentStyle}>
@@ -262,13 +276,14 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
                   if (passwordError) setPasswordError('');
                 }}
                 onSubmit={handleSubmit}
+                submitting={submitting}
               />
             )}
 
             {/* ===== Post-login Account Home ===== */}
-            {view === 'user' && (
+            {view === 'user' && session && (
               <AccountHome
-                userInfo={userInfo}
+                userInfo={{ name: session.username, role: session.role }}
                 onOpenPassword={() => switchView('password')}
                 onOpenUsers={() => switchView('users')}
                 onLogout={handleLogout}
@@ -276,17 +291,20 @@ export default function LoginPanel({ isOpen, onClose, notice, isLoggedIn = false
             )}
 
             {/* ===== Password Change ===== */}
-            {view === 'password' && (
+            {view === 'password' && session && (
               <ChangePasswordPage
-                onSubmit={() => {
+                username={session.username}
+                firstLogin={mustChangePassword}
+                onChanged={() => {
                   addToast('success', '密碼已更新！');
-                  setTimeout(() => navigateBack(), 800);
+                  if (mustChangePassword) onLoggedIn();
+                  setTimeout(() => switchView('user'), 800);
                 }}
               />
             )}
 
-            {/* ===== User Management (admin only) ===== */}
-            {view === 'users' && <UserManagementPage />}
+            {/* ===== User Management (root and admin) ===== */}
+            {view === 'users' && session && <UserManagementPage actor={session.role} />}
 
           </div>
         </div>

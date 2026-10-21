@@ -2,8 +2,19 @@
 
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import AccountSubPage from './AccountSubPage';
-import { INITIAL_USERS, type ManagedUser, type UserRole } from '../data/users';
-import { accountError, countRoles, filterUsers, isLastAdmin, MIN_PASSWORD_LENGTH, passwordError, type RoleFilter } from '../utils/users';
+import type { Role } from '../utils/session';
+import {
+  accountError,
+  assignableRoles,
+  canCreateUsers,
+  canManage,
+  countRoles,
+  filterUsers,
+  ROLE_LABELS,
+  type ManagedUser,
+  type RoleFilter,
+} from '../utils/users';
+import { changeRole, createUser, deleteUser, fetchUsers, resetPassword } from '../utils/usersApi';
 
 // Wider than the other account pages: the account panel widens for this page (see LoginPanel)
 const CONTENT_WIDTH = 1100;
@@ -13,32 +24,36 @@ const VISIBLE_ROWS = 8;
 // How long the confirmation above the list stays after an action
 const NOTICE_MS = 4000;
 
-const ROLE_LABELS: Record<UserRole, string> = { admin: '管理員', user: '使用者' };
 const FILTERS: { role: RoleFilter; label: string }[] = [
   { role: 'all', label: '全部' },
-  { role: 'admin', label: '管理員' },
-  { role: 'user', label: '使用者' },
+  { role: 'admin', label: ROLE_LABELS.admin },
+  { role: 'operator', label: ROLE_LABELS.operator },
+  { role: 'viewer', label: ROLE_LABELS.viewer },
 ];
 
 type RowAction = 'edit' | 'password' | 'delete';
 type RowMode = { account: string; kind: RowAction } | null;
+type Notice = { tone: 'success' | 'error'; text: string } | null;
+
+const isAdminRole = (role: Role) => role === 'root' || role === 'admin';
+const displayName = (user: ManagedUser) => user.name || user.account;
 
 /* ─── Small parts ───────────────────────────────────────────────── */
 
 function Avatar({ user }: { user: ManagedUser }) {
-  const style = user.role === 'admin' ? 'bg-[#62A4A7] text-white' : 'bg-[#D1E6E7] text-[#3F7A7E]';
-  return <span className={`flex h-[56px] w-[56px] shrink-0 items-center justify-center fs-28 font-bold ${style}`}>{user.name[0]}</span>;
+  const style = isAdminRole(user.role) ? 'bg-[#62A4A7] text-white' : 'bg-[#D1E6E7] text-[#3F7A7E]';
+  return <span className={`flex h-[56px] w-[56px] shrink-0 items-center justify-center fs-28 font-bold ${style}`}>{displayName(user)[0]}</span>;
 }
 
-function RolePill({ role }: { role: UserRole }) {
-  const style = role === 'admin' ? 'bg-[#62A4A7] text-white' : 'bg-[#D1E6E7] text-[#3F7A7E]';
+function RolePill({ role }: { role: Role }) {
+  const style = isAdminRole(role) ? 'bg-[#62A4A7] text-white' : 'bg-[#D1E6E7] text-[#3F7A7E]';
   return <span className={`inline-flex h-[40px] items-center px-[16px] fs-22 font-bold ${style}`}>{ROLE_LABELS[role]}</span>;
 }
 
-function RolePicker({ value, onChange }: { value: UserRole; onChange: (role: UserRole) => void }) {
+function RolePicker({ roles, value, onChange }: { roles: Role[]; value: Role; onChange: (role: Role) => void }) {
   return (
     <span className="inline-flex border-2 border-[#62A4A7]">
-      {(['admin', 'user'] as const).map((role) => (
+      {roles.map((role) => (
         <button
           key={role}
           type="button"
@@ -128,23 +143,35 @@ function SearchBox({ value, onChange }: { value: string; onChange: (value: strin
 
 /* ─── Add user ──────────────────────────────────────────────────── */
 
-function AddUserForm({ users, onAdd, onCancel }: { users: ManagedUser[]; onAdd: (user: ManagedUser) => void; onCancel: () => void }) {
+interface AddUserFormProps {
+  users: ManagedUser[];
+  roles: Role[];
+  onAdd: (account: string, name: string, role: Role) => Promise<void>;
+  onCancel: () => void;
+}
+
+// The new account gets the default password, to be changed on its first login
+function AddUserForm({ users, roles, onAdd, onCancel }: AddUserFormProps) {
   const [account, setAccount] = useState('');
   const [name, setName] = useState('');
-  const [role, setRole] = useState<UserRole>('user');
+  const [role, setRole] = useState<Role>('viewer');
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     const problem = accountError(account, users) ?? (name.trim() ? null : '請輸入姓名');
-    if (problem) {
+    if (problem || submitting) {
       setError(problem);
       return;
     }
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, '0');
-    const registeredAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
-    onAdd({ account: account.trim(), name: name.trim(), role, registeredAt, lastActiveAt: null });
+    setSubmitting(true);
+    try {
+      await onAdd(account.trim(), name.trim(), role);
+    } catch (failure) {
+      setError((failure as Error).message);
+      setSubmitting(false);
+    }
   };
 
   const field = 'h-[56px] min-w-0 bg-white px-[16px] fs-24 font-normal text-[#2C322F] outline-none shadow-[inset_0_0_0_2px_#D1E6E7] focus:shadow-[inset_0_0_0_2px_#62A4A7]';
@@ -155,14 +182,14 @@ function AddUserForm({ users, onAdd, onCancel }: { users: ManagedUser[]; onAdd: 
       <div className="flex items-center gap-[14px]">
         <input autoFocus value={account} onChange={(event) => setAccount(event.target.value)} placeholder="帳號，例如 lin.xiaoming" aria-label="帳號" className={`${field} flex-[3]`} />
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="姓名" aria-label="姓名" className={`${field} flex-[2]`} />
-        <RolePicker value={role} onChange={setRole} />
+        <RolePicker roles={roles} value={role} onChange={setRole} />
       </div>
       <div className="flex items-center justify-between gap-[14px]">
         <span role="alert" className="fs-20 font-bold text-[#98412F]">{error}</span>
         <span className="flex gap-[8px]">
           <TextButton onClick={onCancel}>取消</TextButton>
-          <button type="submit" className="h-[44px] bg-[#62A4A7] px-[20px] fs-22 font-bold text-white transition-colors hover:bg-[#54999D]">
-            建立
+          <button type="submit" disabled={submitting} className="h-[44px] bg-[#62A4A7] px-[20px] fs-22 font-bold text-white transition-colors hover:bg-[#54999D] disabled:cursor-wait disabled:opacity-60">
+            {submitting ? '建立中…' : '建立'}
           </button>
         </span>
       </div>
@@ -172,54 +199,34 @@ function AddUserForm({ users, onAdd, onCancel }: { users: ManagedUser[]; onAdd: 
 
 /* ─── User row ──────────────────────────────────────────────────── */
 
-// An admin sets a new password for the user; it is typed twice and checked like on the change-password page
-function PasswordResetForm({ user, onCancel, onSave }: { user: ManagedUser; onCancel: () => void; onSave: () => void }) {
-  const [password, setPassword] = useState('');
-  const [confirmation, setConfirmation] = useState('');
-  const [error, setError] = useState<string | null>(null);
-
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    const problem = passwordError(password, confirmation);
-    if (problem) setError(problem);
-    else onSave();
-  };
-
-  const field = 'h-[52px] min-w-0 flex-1 bg-white px-[16px] fs-22 font-normal text-[#2C322F] outline-none shadow-[inset_0_0_0_2px_#D1E6E7] focus:shadow-[inset_0_0_0_2px_#62A4A7]';
-
-  return (
-    <form onSubmit={submit} className="flex flex-col gap-[10px] border-t border-dashed border-[#D1E6E7] pb-[18px] pl-[88px] pr-[16px] pt-[14px]">
-      <span className="fs-22 font-bold text-[#2C322F]">
-        重設 {user.name} 的密碼
-        <span className="ml-[12px] fs-18 font-normal text-[#6F7468]">至少 {MIN_PASSWORD_LENGTH} 碼，需同時包含英文字母與數字</span>
-      </span>
-      <div className="flex items-center gap-[12px]">
-        <input autoFocus type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="新密碼" aria-label="新密碼" className={field} />
-        <input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="再次輸入新密碼" aria-label="再次輸入新密碼" className={field} />
-        <TextButton onClick={onCancel}>取消</TextButton>
-        <button type="submit" className="h-[44px] shrink-0 bg-[#62A4A7] px-[18px] fs-22 font-bold text-white transition-colors hover:bg-[#54999D]">
-          儲存密碼
-        </button>
-      </div>
-      <span role="alert" className="min-h-[26px] fs-20 font-bold text-[#98412F]">{error}</span>
-    </form>
-  );
-}
-
 interface UserRowProps {
   user: ManagedUser;
   mode: 'view' | RowAction;
-  locked: boolean;
+  // the roles the viewer may give; null when they may not manage this user at all
+  roles: Role[] | null;
+  busy: boolean;
   onMode: (kind: RowAction | null) => void;
-  onRoleChange: (role: UserRole) => void;
+  onRoleChange: (role: Role) => void;
   onPasswordReset: () => void;
   onDelete: () => void;
 }
 
-function UserRow({ user, mode, locked, onMode, onRoleChange, onPasswordReset, onDelete }: UserRowProps) {
+// Asked before resetting a password or deleting, in place of the row's buttons
+function Confirm({ question, action, busy, onCancel, onConfirm }: { question: string; action: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <span className="fs-20 font-bold text-[#98412F]">{question}</span>
+      <TextButton onClick={onCancel}>取消</TextButton>
+      <button type="button" disabled={busy} onClick={onConfirm} className="h-[44px] bg-[#BC5646] px-[14px] fs-22 font-bold text-white transition-colors hover:bg-[#A84A3B] disabled:cursor-wait disabled:opacity-60">
+        {action}
+      </button>
+    </>
+  );
+}
+
+function UserRow({ user, mode, roles, busy, onMode, onRoleChange, onPasswordReset, onDelete }: UserRowProps) {
   const [draftRole, setDraftRole] = useState(user.role);
-  const lockReason = '系統至少需要一位管理員';
-  const background = mode === 'delete' ? 'bg-[#F7E5DF]/60' : mode === 'password' ? 'bg-white' : 'hover:bg-white';
+  const background = mode === 'delete' || mode === 'password' ? 'bg-[#F7E5DF]/60' : 'hover:bg-white';
 
   return (
     <div className={`group relative border-b border-[#ECE9E0] transition-colors duration-200 ${background}`}>
@@ -228,50 +235,36 @@ function UserRow({ user, mode, locked, onMode, onRoleChange, onPasswordReset, on
         <div className="flex min-w-0 items-center gap-[16px]">
           <Avatar user={user} />
           <span className="flex min-w-0 flex-col">
-            <span className="truncate fs-30 font-bold text-[#2C322F]">{user.name}</span>
+            <span className="truncate fs-30 font-bold text-[#2C322F]">{displayName(user)}</span>
             <span className="truncate fs-20 font-normal text-[#6F7468]">{user.account}</span>
           </span>
         </div>
 
-        <div>{mode === 'edit' ? <RolePicker value={draftRole} onChange={setDraftRole} /> : <RolePill role={user.role} />}</div>
+        <div>{mode === 'edit' && roles ? <RolePicker roles={roles} value={draftRole} onChange={setDraftRole} /> : <RolePill role={user.role} />}</div>
         <div><DateTime value={user.registeredAt} /></div>
         <div>{user.lastActiveAt ? <DateTime value={user.lastActiveAt} /> : <span className="fs-22 font-bold text-[#8A8E86]">尚未登入</span>}</div>
 
+        {/* only accounts the viewer may manage get buttons: root's is managed by nobody, admins' only by root */}
         <div className="flex items-center justify-end gap-[4px]">
-          {(mode === 'view' || mode === 'password') && (
+          {roles && mode === 'view' && (
             <>
               <TextButton onClick={() => onMode('edit')}>編輯</TextButton>
-              <TextButton onClick={() => onMode(mode === 'password' ? null : 'password')}>重設密碼</TextButton>
-              <TextButton tone="danger" disabled={locked} title={locked ? lockReason : undefined} onClick={() => onMode('delete')}>
-                刪除
-              </TextButton>
+              <TextButton onClick={() => onMode('password')}>重設密碼</TextButton>
+              <TextButton tone="danger" onClick={() => onMode('delete')}>刪除</TextButton>
             </>
           )}
           {mode === 'edit' && (
             <>
               <TextButton onClick={() => onMode(null)}>取消</TextButton>
-              <TextButton
-                tone="primary"
-                disabled={locked && draftRole !== 'admin'}
-                title={locked && draftRole !== 'admin' ? lockReason : undefined}
-                onClick={() => onRoleChange(draftRole)}
-              >
+              <TextButton tone="primary" disabled={busy || draftRole === user.role} onClick={() => onRoleChange(draftRole)}>
                 儲存
               </TextButton>
             </>
           )}
-          {mode === 'delete' && (
-            <>
-              <span className="fs-20 font-bold text-[#98412F]">確定刪除？</span>
-              <TextButton onClick={() => onMode(null)}>取消</TextButton>
-              <button type="button" onClick={onDelete} className="h-[44px] bg-[#BC5646] px-[14px] fs-22 font-bold text-white transition-colors hover:bg-[#A84A3B]">
-                刪除
-              </button>
-            </>
-          )}
+          {mode === 'password' && <Confirm question="改回預設密碼？" action="重設" busy={busy} onCancel={() => onMode(null)} onConfirm={onPasswordReset} />}
+          {mode === 'delete' && <Confirm question="確定刪除？" action="刪除" busy={busy} onCancel={() => onMode(null)} onConfirm={onDelete} />}
         </div>
       </div>
-      {mode === 'password' && <PasswordResetForm user={user} onCancel={() => onMode(null)} onSave={onPasswordReset} />}
     </div>
   );
 }
@@ -291,14 +284,21 @@ function AddUserButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-// Changes stay on this page until users are stored on the backend
-export default function UserManagementPage() {
-  const [users, setUsers] = useState(INITIAL_USERS);
+// The accounts from the backend; every change is saved there, then shown here. `actor` is the viewer's role, which
+// decides who they may manage.
+export default function UserManagementPage({ actor }: { actor: Role }) {
+  const [users, setUsers] = useState<ManagedUser[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
   const [adding, setAdding] = useState(false);
   const [rowMode, setRowMode] = useState<RowMode>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<Notice>(null);
+
+  useEffect(() => {
+    fetchUsers().then(setUsers, (error: Error) => setLoadError(error.message));
+  }, []);
 
   useEffect(() => {
     if (!notice) return;
@@ -306,18 +306,40 @@ export default function UserManagementPage() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const shown = filterUsers(users, query, roleFilter);
-  const counts = countRoles(users);
+  const list = users ?? [];
+  const shown = filterUsers(list, query, roleFilter);
+  const counts = countRoles(list);
 
-  const updateUser = (account: string, change: Partial<ManagedUser>) =>
-    setUsers((current) => current.map((user) => (user.account === account ? { ...user, ...change } : user)));
+  // Runs a change on the backend; on success applies it to the list and confirms it, on failure says why
+  const run = async (change: () => Promise<(current: ManagedUser[]) => ManagedUser[]>, success: string) => {
+    setBusy(true);
+    try {
+      const apply = await change();
+      setUsers((current) => apply(current ?? []));
+      setNotice({ tone: 'success', text: success });
+      setRowMode(null);
+    } catch (error) {
+      setNotice({ tone: 'error', text: (error as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addUser = async (account: string, name: string, role: Role) => {
+    const user = await createUser(account, name, role);
+    setUsers((current) => [user, ...(current ?? [])]);
+    setAdding(false);
+    setNotice({ tone: 'success', text: `已建立 ${name}（${account}），首次登入需修改預設密碼` });
+  };
+
+  const emptyText = loadError ?? (users === null ? '載入中…' : '找不到符合的使用者');
 
   return (
     <AccountSubPage
       title="用戶管理"
       description="新增帳號、調整角色或移除不再使用的帳號"
       width={CONTENT_WIDTH}
-      action={<AddUserButton onClick={() => setAdding(true)} />}
+      action={canCreateUsers(actor) ? <AddUserButton onClick={() => setAdding(true)} /> : undefined}
     >
       <div className="mt-[28px] flex items-end justify-between gap-[20px] border-b-2 border-[#ECE9E0]">
         <RoleTabs counts={counts} value={roleFilter} onChange={setRoleFilter} />
@@ -327,18 +349,16 @@ export default function UserManagementPage() {
       </div>
 
       {adding && (
-        <AddUserForm
-          users={users}
-          onCancel={() => setAdding(false)}
-          onAdd={(user) => {
-            setUsers((current) => [user, ...current]);
-            setAdding(false);
-          }}
-        />
+        <AddUserForm users={list} roles={assignableRoles(actor)} onCancel={() => setAdding(false)} onAdd={addUser} />
       )}
 
-      <p aria-live="polite" className={`mt-[14px] flex h-[48px] items-center gap-[10px] px-[16px] fs-22 font-bold transition-opacity duration-300 ${notice ? 'bg-[#D1E6E7] text-[#3F7A7E] opacity-100' : 'opacity-0'}`}>
-        {notice && <>✓ {notice}</>}
+      <p
+        aria-live="polite"
+        className={`mt-[14px] flex h-[48px] items-center gap-[10px] px-[16px] fs-22 font-bold transition-opacity duration-300 ${
+          !notice ? 'opacity-0' : notice.tone === 'success' ? 'bg-[#D1E6E7] text-[#3F7A7E] opacity-100' : 'bg-[#F7E5DF] text-[#98412F] opacity-100'
+        }`}
+      >
+        {notice && <>{notice.tone === 'success' ? '✓' : '!'} {notice.text}</>}
       </p>
 
       <div className={`${COLUMNS} mt-[6px] px-[16px] pb-[10px] fs-20 font-bold text-[#8A8E86]`}>
@@ -350,32 +370,39 @@ export default function UserManagementPage() {
       </div>
 
       <div className="overflow-y-auto border-t border-[#ECE9E0] [scrollbar-width:thin]" style={{ maxHeight: ROW_HEIGHT * VISIBLE_ROWS }}>
-        {shown.length === 0 && <p className="py-[48px] text-center fs-24 font-bold text-[#8A8E86]">找不到符合的使用者</p>}
+        {shown.length === 0 && <p className="py-[48px] text-center fs-24 font-bold text-[#8A8E86]">{emptyText}</p>}
         {shown.map((user) => (
           <UserRow
             key={`${user.account}-${rowMode?.account === user.account ? rowMode.kind : 'view'}`}
             user={user}
             mode={rowMode?.account === user.account ? rowMode.kind : 'view'}
-            locked={isLastAdmin(users, user.account)}
+            roles={canManage(actor, user.role) ? assignableRoles(actor) : null}
+            busy={busy}
             onMode={(kind) => setRowMode(kind ? { account: user.account, kind } : null)}
-            onPasswordReset={() => {
-              setNotice(`已重設 ${user.name}（${user.account}）的密碼`);
-              setRowMode(null);
-            }}
-            onRoleChange={(role) => {
-              updateUser(user.account, { role });
-              setRowMode(null);
-            }}
-            onDelete={() => {
-              setUsers((current) => current.filter((candidate) => candidate.account !== user.account));
-              setRowMode(null);
-            }}
+            onRoleChange={(role) =>
+              run(async () => {
+                const changed = await changeRole(user.id, role);
+                return (current) => current.map((candidate) => (candidate.id === user.id ? changed : candidate));
+              }, `已將 ${displayName(user)} 改為${ROLE_LABELS[role]}`)
+            }
+            onPasswordReset={() =>
+              run(async () => {
+                await resetPassword(user.id);
+                return (current) => current;
+              }, `已將 ${displayName(user)}（${user.account}）的密碼改回預設密碼，下次登入需修改`)
+            }
+            onDelete={() =>
+              run(async () => {
+                await deleteUser(user.id);
+                return (current) => current.filter((candidate) => candidate.id !== user.id);
+              }, `已刪除 ${displayName(user)}（${user.account}）`)
+            }
           />
         ))}
       </div>
 
       <p className="mt-[14px] px-[16px] fs-20 font-bold text-[#8A8E86]">
-        顯示 {shown.length} / 共 {users.length} 位使用者
+        顯示 {shown.length} / 共 {list.length} 位使用者
       </p>
     </AccountSubPage>
   );

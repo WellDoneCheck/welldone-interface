@@ -1,6 +1,7 @@
 import Image from 'next/image';
 import type { UserInfo } from './LoginPanel';
 import { SERIF_FONT } from './AccountSubPage';
+import { canManageUsers, ROLE_LABELS } from '../utils/users';
 
 interface AccountHomeProps {
   userInfo: UserInfo | null;
@@ -39,7 +40,7 @@ function MenuButton({ icon, iconWidth, iconHeight, title, description, onClick }
 }
 
 export default function AccountHome({ userInfo, onOpenPassword, onOpenUsers, onLogout }: AccountHomeProps) {
-  const isAdmin = userInfo?.role === 'admin';
+  const role = userInfo?.role ?? 'viewer';
 
   return (
     <div className="flex w-full max-w-[calc(491px*var(--col))] flex-col items-center">
@@ -51,22 +52,23 @@ export default function AccountHome({ userInfo, onOpenPassword, onOpenUsers, onL
         {userInfo?.name}
       </h2>
       <span
-        className="mt-[14px] flex h-[50px] w-[115px] items-center justify-center border border-[#D1E6E7] bg-white fs-24 font-black text-[#62A4A7]"
+        className="mt-[14px] flex h-[50px] min-w-[115px] px-4 items-center justify-center border border-[#D1E6E7] bg-white fs-24 font-black text-[#62A4A7]"
         style={SERIF_FONT}
       >
-        {isAdmin ? '管理員' : '一般用戶'}
+        {ROLE_LABELS[role]}
       </span>
 
       <div className="mt-[63px] flex w-full flex-col gap-[33px]">
-        <MenuButton
+        {/* root's password is set in the backend's .env, not here */}
+        {role !== 'root' && <MenuButton
           icon="/admin/icon-password-reset.svg"
           iconWidth={42}
           iconHeight={48}
           title="修改密碼"
           description="更新您的登入密碼"
           onClick={onOpenPassword}
-        />
-        {isAdmin && (
+        />}
+        {canManageUsers(role) && (
           <MenuButton
             icon="/admin/icon-users.svg"
             iconWidth={42}
