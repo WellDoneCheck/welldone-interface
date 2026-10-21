@@ -1,16 +1,10 @@
 'use client';
 
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import InlineNameInput from './InlineNameInput';
-import { defaultRecordName, type RecordItem } from '../data/mapRecords';
-import { getRecordNames, getServerRecordNames, recordName, renameRecord, subscribeToRecordNames } from '../utils/recordNames';
-
-type NamedRecord = Pick<RecordItem, 'id' | 'timestamp'>;
-
-// Every map file's given name, by record id, kept up to date across pages and tabs
-export function useRecordNames() {
-  return useSyncExternalStore(subscribeToRecordNames, getRecordNames, getServerRecordNames);
-}
+import { useSiteChrome } from './SiteChrome';
+import { canRename, displayName, givenName, renameTask, type NamedTask } from '../utils/tasks';
+import { taipeiDateTime } from '../utils/taipeiTime';
 
 function FileIcon({ size }: { size: number }) {
   return (
@@ -32,21 +26,31 @@ function PencilIcon() {
 }
 
 interface RecordNameProps {
-  record: NamedRecord;
+  record: NamedTask;
   iconSize: number;
   // type size, weight and color; the icon, pencil and field follow the text color
   className?: string;
 }
 
-// The name of the map file a well was found in, renamed in place with the pencil beside it
+// The name of the map file a well was found in, renamed in place with the pencil beside it (not by viewers)
 export default function RecordName({ record, iconSize, className = '' }: RecordNameProps) {
-  const names = useRecordNames();
+  const { session } = useSiteChrome();
   const [editing, setEditing] = useState(false);
-  const name = recordName(record, names);
+  // as renamed here, until the page is given the map again
+  const [renamed, setRenamed] = useState<{ from: string; to: string } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const current = renamed?.from === record.name ? renamed.to : record.name;
+  const name = displayName(current);
 
-  const finishEditing = (draft: string | null) => {
+  const finishEditing = async (draft: string | null) => {
     setEditing(false);
-    if (draft !== null) renameRecord(record.id, draft);
+    if (draft === null || draft.trim() === givenName(current)) return;
+    setError(null);
+    try {
+      setRenamed({ from: record.name, to: (await renameTask(record, draft)).name });
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
   };
 
   return (
@@ -54,8 +58,8 @@ export default function RecordName({ record, iconSize, className = '' }: RecordN
       <FileIcon size={iconSize} />
       {editing ? (
         <InlineNameInput
-          initial={names[record.id] ?? ''}
-          placeholder={defaultRecordName(record)}
+          initial={givenName(current)}
+          placeholder={displayName(taipeiDateTime(record.created_at))}
           label="圖檔名稱"
           onDone={finishEditing}
           className="border-current placeholder:opacity-50"
@@ -66,14 +70,21 @@ export default function RecordName({ record, iconSize, className = '' }: RecordN
             <span className="sr-only">圖檔：</span>
             {name}
           </span>
-          <button
-            type="button"
-            aria-label={`重新命名圖檔「${name}」`}
-            onClick={() => setEditing(true)}
-            className="shrink-0 p-[0.2em] opacity-45 outline-none transition-opacity duration-300 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-current group-hover/record:opacity-80"
-          >
-            <PencilIcon />
-          </button>
+          {session && canRename(session.role) && (
+            <button
+              type="button"
+              aria-label={`重新命名圖檔「${name}」`}
+              onClick={() => setEditing(true)}
+              className="shrink-0 p-[0.2em] opacity-45 outline-none transition-opacity duration-300 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-current group-hover/record:opacity-80"
+            >
+              <PencilIcon />
+            </button>
+          )}
+          {error && (
+            <span role="alert" className="shrink-0 text-[0.7em] font-normal text-[#FFB4A8]">
+              {error}
+            </span>
+          )}
         </>
       )}
     </div>

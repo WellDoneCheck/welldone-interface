@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { EXPORT_WELLS } from '../data/exportWells';
 import SharedTransition, { OPEN_SHEET, SHARED } from './SharedTransition';
 import { useWellVerdicts } from './useWellVerdicts';
+import { useMapView } from './useMapView';
 import { countVerdicts } from '../utils/wellVerdicts';
+import type { MapWell } from '../utils/wells';
 
 function WellCount({ count, label, color }: { count: number; label: string; color: string }) {
   return (
@@ -15,15 +16,18 @@ function WellCount({ count, label, color }: { count: number; label: string; colo
   );
 }
 
-// Map-page shortcut to the export page: the well tally on paper, the action on the brand block
-export default function ExportEntry() {
+// Map-page shortcut to the export page of a map (recordId; the newest finished one if none): the well tally on paper,
+// the action on the brand block. wells: the map's wells when the page has them newer than when they were read (the map
+// page, while the AI is still adding wells)
+export default function ExportEntry({ recordId, wells }: { recordId?: string; wells?: MapWell[] }) {
+  const loaded = useMapView(recordId ?? null);
   // as verified so far, on the check and export pages
-  const { verified, pending } = countVerdicts(EXPORT_WELLS, useWellVerdicts());
+  const { verified, pending } = countVerdicts(wells ?? (loaded?.status === 'ready' ? loaded.value.wells : []), useWellVerdicts());
   return (
     // on every page in the same corner: it stays put while the rest of the page changes
     <SharedTransition name={SHARED.exportEntry}>
       <Link
-        href="/export"
+        href={recordId ? `/export?record=${encodeURIComponent(recordId)}` : '/export'}
         transitionTypes={OPEN_SHEET}
         aria-label={`資料匯出：${verified} 口已驗證、${pending} 口未驗證`}
         className="group block w-fit outline-none focus-visible:shadow-[0_0_0_4px_#62A4A7]"

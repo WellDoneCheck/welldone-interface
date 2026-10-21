@@ -6,6 +6,7 @@ import type { Map as MapLibreMap, MapMouseEvent, PaddingOptions } from 'maplibre
 import TileMap, { MapShade, type Bounds } from './TileMap';
 import SharedTransition, { PageBackgroundTransition, UPLOAD_RECORD_SHARE, uploadRecordName } from './SharedTransition';
 import type { MapCamera } from '../utils/mapCamera';
+import type { Imagery } from '../utils/tileServer';
 
 // The survey map shared by the map and compare pages (the (survey) route group's layout): it stays as it is when moving
 // between them, each page only fitting it to its own area and adding its own pins or markers, instead of every page
@@ -15,6 +16,8 @@ import type { MapCamera } from '../utils/mapCamera';
 // What a page wants of the map: the area to fit it to (moved to when it changes), how it starts (the first page shown
 // decides: camera, placeholder, startAfter, see TileMap) and what clicks and rests on it do
 export interface SurveyMapSettings {
+  // the imported map's imagery (swapped in place when another page or map names another)
+  imagery: Imagery | null;
   fit: { bounds: Bounds; padding: PaddingOptions };
   camera?: MapCamera;
   placeholder?: string;

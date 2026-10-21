@@ -1,25 +1,30 @@
-// Capture dates of a well, oldest first. Placeholder data until they come from the backend.
+// A well's captures: the same spot in every imported map (Backend-SPEC §4.5, GET /wells/:id/timeline), oldest first
+import { taipeiDateTime } from './taipeiTime';
+import { wellImageUrl, type Verdict } from './wells';
 
-export interface Capture {
-  id: string;
-  // 'YYYY-MM-DD HH:mm'
-  capturedAt: string;
+// One entry of the timeline as the backend sends it; only the fields the site uses
+export interface TimelineEntry {
+  task_id: string;
+  task_created_at: string;
+  // the well nearest the spot in that map
+  well: { id: number; code: string; verdict: Verdict | null; distance_m: number };
 }
 
-export const CAPTURES: Capture[] = [
-  { id: 'c-2013-04-18', capturedAt: '2013-04-18 10:30' },
-  { id: 'c-2014-09-25', capturedAt: '2014-09-25 14:15' },
-  { id: 'c-2015-06-02', capturedAt: '2015-06-02 10:20' },
-  { id: 'c-2016-12-07', capturedAt: '2016-12-07 11:40' },
-  { id: 'c-2017-11-20', capturedAt: '2017-11-20 09:45' },
-  { id: 'c-2019-03-14', capturedAt: '2019-03-14 13:10' },
-  { id: 'c-2020-07-22', capturedAt: '2020-07-22 15:05' },
-  { id: 'c-2021-08-09', capturedAt: '2021-08-09 11:05' },
-  { id: 'c-2022-05-16', capturedAt: '2022-05-16 09:50' },
-  { id: 'c-2023-10-11-am', capturedAt: '2023-10-11 09:05' },
-  { id: 'c-2023-10-11-pm', capturedAt: '2023-10-11 14:30' },
-  { id: 'c-2024-05-30', capturedAt: '2024-05-30 10:40' },
-];
+export interface Capture {
+  // the map it is from
+  id: string;
+  // when that map came in: 'YYYY-MM-DD HH:mm', Taipei time
+  capturedAt: string;
+  // the photo around the well in that map (a backend path)
+  image: string;
+}
+
+// Square photos as large as the check page shows them
+const CAPTURE_IMAGE_SIZE = 702;
+
+export function toCapture(entry: TimelineEntry): Capture {
+  return { id: entry.task_id, capturedAt: taipeiDateTime(entry.task_created_at), image: wellImageUrl({ wellId: entry.well.id }, CAPTURE_IMAGE_SIZE) };
+}
 
 // '2023-10-11 14:30' -> '2023-10-11'
 export function formatDate(capturedAt: string): string {

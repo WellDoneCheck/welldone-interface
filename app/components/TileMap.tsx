@@ -2,10 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
-import type { Map as MapLibreMap, MapMouseEvent, PaddingOptions, StyleSpecification, SymbolLayerSpecification } from 'maplibre-gl';
+import type { Map as MapLibreMap, MapMouseEvent, PaddingOptions, RasterSourceSpecification, StyleSpecification, SymbolLayerSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { IMAGERY_BOUNDS } from '../data/xizhouImagery';
-import { BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM, BASEMAP_TILES, IMAGERY_TILE_SIZE, IMAGERY_TILES } from '../utils/tileServer';
+import { authorizeTile, BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM, BASEMAP_TILES, IMAGERY_TILE_SIZE, type Imagery } from '../utils/tileServer';
 import { isLightBackdrop, reportLogoBackdrop } from '../utils/logoBackdrop';
 import type { MapCamera } from '../utils/mapCamera';
 import type { ViewportSize } from './pageFrame';
@@ -178,21 +177,45 @@ function Overlay({ map, children }: { map: MapLibreMap; children: (view: MapView
   );
 }
 
-// The survey imagery from titiler over the electronic map, which fills in around the imaged strip (where the survey's
-// tiles are transparent).
-function mapStyle(): StyleSpecification {
-  const paint = { 'raster-fade-duration': 200 };
+const RASTER_PAINT = { 'raster-fade-duration': 200 };
+
+// An imported map's imagery, from the backend (§4.4); outside its bounds the backend has no tiles to ask for
+const imagerySource = (imagery: Imagery): RasterSourceSpecification => ({
+  type: 'raster',
+  tiles: imagery.tiles,
+  tileSize: IMAGERY_TILE_SIZE,
+  bounds: imagery.bounds,
+  minzoom: imagery.minzoom,
+  maxzoom: imagery.maxzoom,
+});
+
+// The imported map's imagery over the electronic map, which fills in around it (where its tiles are transparent or
+// missing); the electronic map alone while there is no imagery.
+function mapStyle(imagery: Imagery | null): StyleSpecification {
   return {
     version: 8,
     sources: {
       basemap: { type: 'raster', tiles: [BASEMAP_TILES], tileSize: 256, maxzoom: BASEMAP_MAX_ZOOM, attribution: BASEMAP_ATTRIBUTION },
-      imagery: { type: 'raster', tiles: [IMAGERY_TILES], tileSize: IMAGERY_TILE_SIZE, bounds: IMAGERY_BOUNDS, minzoom: 12, maxzoom: 22 },
+      ...(imagery && { imagery: imagerySource(imagery) }),
     },
     layers: [
-      { id: 'basemap', type: 'raster', source: 'basemap', paint },
-      { id: 'imagery', type: 'raster', source: 'imagery', paint },
+      { id: 'basemap', type: 'raster', source: 'basemap', paint: RASTER_PAINT },
+      ...(imagery ? [{ id: 'imagery', type: 'raster' as const, source: 'imagery', paint: RASTER_PAINT }] : []),
     ],
   };
+}
+
+// Another imported map's imagery on a map already started (e.g. the survey map, kept from one map to the next)
+function showImagery(map: MapLibreMap, imagery: Imagery | null) {
+  if (map.getLayer('imagery')) map.removeLayer('imagery');
+  if (map.getSource('imagery')) map.removeSource('imagery');
+  // under whatever the pages added (pins, markers)
+  const firstAdded = map.getStyle().layers.find((layer) => layer.id !== 'basemap')?.id;
+  if (imagery) {
+    map.addSource('imagery', imagerySource(imagery));
+    map.addLayer({ id: 'imagery', type: 'raster', source: 'imagery', paint: RASTER_PAINT }, firstAdded);
+  }
+  map.setMaxBounds(imagery ? panLimit(imagery.bounds) : null);
 }
 
 const MAPLIBRE_WORKER_URL = '/maplibre-worker/maplibre-gl-worker.mjs';
@@ -273,26 +296,26 @@ function useLogoBackdrop(map: MapLibreMap | null, containerRef: RefObject<HTMLDi
   useEffect(() => () => reportLogoBackdrop(source, null), [source]);
 }
 
-// Panning stops a strip's width (and height) past the survey on every side: room for the pages that keep the strip
-// clear of a card or panel covering part of the map
-const PAN_LIMIT: Bounds = (() => {
-  const [west, south, east, north] = IMAGERY_BOUNDS;
+// Panning stops the imagery's width (and height) past it on every side: room for the pages that keep it clear of a
+// card or panel covering part of the map
+function panLimit([west, south, east, north]: Bounds): Bounds {
   const [marginX, marginY] = [east - west, north - south];
   return [west - marginX, south - marginY, east + marginX, north + marginY];
-})();
+}
 
-// The whole strip, clear of the navbar above and whatever covers the right part of the page (e.g. the map's well
-// card). The map, import and monitor pages start from it, so moving between them keeps the map still.
-// rightCovered false: nothing covers the right (the map page before a card opens), so the strip is centred.
-export function stripFit(viewport: ViewportSize, rightCovered = true): { bounds: Bounds; padding: PaddingOptions } {
+// The whole imagery (its bounds), clear of the navbar above and whatever covers the right part of the page (e.g. the
+// map's well card). rightCovered false: nothing covers the right (the map page before a card opens), so it is centred.
+export function stripFit(bounds: Bounds, viewport: ViewportSize, rightCovered = true): { bounds: Bounds; padding: PaddingOptions } {
   const side = Math.round(viewport.width * 0.06);
   return {
-    bounds: IMAGERY_BOUNDS,
+    bounds,
     padding: { top: 150, bottom: 40, left: side, right: rightCovered ? Math.round(viewport.width * 0.42) : side },
   };
 }
 
 interface TileMapProps {
+  // the imported map's imagery over the electronic map (changed in place when it changes); none: the electronic map alone
+  imagery?: Imagery | null;
   // the area shown at first (fitted again, animated, when it changes)
   fit: { bounds: Bounds; padding: PaddingOptions };
   // start here instead of the fitted area (e.g. the map as it was left), and keep it whatever size the map ends up
@@ -315,8 +338,9 @@ interface TileMapProps {
   startAfter?: number;
 }
 
-// A real map of the survey: tiles from titiler (see utils/tileServer), with whatever the page draws over it
+// A real map: an imported map's tiles from the backend (see utils/tileServer), with whatever the page draws over it
 export default function TileMap({
+  imagery = null,
   fit,
   camera,
   interactive = false,
@@ -335,6 +359,9 @@ export default function TileMap({
   const firstStartAfter = useRef(startAfter);
   const firstFit = useRef(fit);
   const firstCamera = useRef(camera);
+  // the imagery shown: its tiles are asked for with the token (transformRequest), and it is swapped when it changes
+  const imageryRef = useRef(imagery);
+  const shownImagery = useRef(imagery);
   const onMapClickRef = useRef(onMapClick);
   useEffect(() => {
     onMapClickRef.current = onMapClick;
@@ -354,10 +381,11 @@ export default function TileMap({
         const start = firstCamera.current;
         created = new Map({
           container: containerRef.current,
-          style: mapStyle(),
+          style: mapStyle(shownImagery.current),
+          transformRequest: (url) => authorizeTile(url, imageryRef.current),
           ...(start ? { center: start.center, zoom: start.zoom } : { bounds, fitBoundsOptions: { padding } }),
           interactive,
-          maxBounds: PAN_LIMIT,
+          maxBounds: shownImagery.current ? panLimit(shownImagery.current.bounds) : undefined,
           maxZoom: 22.5,
           attributionControl: false,
           renderWorldCopies: false,
@@ -419,6 +447,13 @@ export default function TileMap({
     const { bounds, padding } = JSON.parse(fitKey) as TileMapProps['fit'];
     map.fitBounds(bounds, { padding, duration: 700 });
   }, [map, fitKey]);
+
+  useEffect(() => {
+    imageryRef.current = imagery;
+    if (!map || imagery?.tiles[0] === shownImagery.current?.tiles[0]) return;
+    shownImagery.current = imagery;
+    showImagery(map, imagery);
+  }, [map, imagery]);
 
   useEffect(() => {
     if (map) onReady?.(map);

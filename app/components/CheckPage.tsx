@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import TimelineCompare from './TimelineCompare';
 import BackToMapLink from './BackToMapLink';
@@ -8,16 +8,12 @@ import ExportEntry from './ExportEntry';
 import SharedTransition, { FROM_EXPORT_SHARE, PageBackgroundTransition, SHARED, TO_MAP, pagePart } from './SharedTransition';
 import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_X, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER } from './pageFrame';
-import { CAPTURES } from '../data/captures';
-import type { MapWell } from '../data/mapRecords';
-import type { WellVerdict } from '../data/exportWells';
+import { useSiteChrome } from './SiteChrome';
 import { useWellVerdicts } from './useWellVerdicts';
-import { setWellVerdict, verdictOf } from '../utils/wellVerdicts';
-import { findSourceMap } from '../utils/routeRecords';
+import { canVerify, saveVerdict, verdictOf } from '../utils/wellVerdicts';
 import { rememberVisit } from '../utils/lastVisit';
-
-// What the check page shows of a well: imported map records and export-page wells both provide it
-export type CheckedWell = Pick<MapWell, 'id' | 'coordinates' | 'timestamp'>;
+import type { CheckView } from '../utils/routeRecords';
+import type { MapWell, Verdict } from '../utils/wells';
 
 // The info column (560 wide: a 72px well id like SW-2023-A005 needs ~530) and the compare panel (film strip + square
 // image, 972 wide and 702 tall) with at least 60px between them, scaled to fit the content area lined up with the navbar
@@ -26,7 +22,7 @@ const INFO_WIDTH = 560;
 const OVERLAY_STAGE: FitStage = { width: INFO_WIDTH + 60 + 972, height: PANEL_HEIGHT, marginX: FRAME_MARGIN_X, marginY: FRAME_MARGIN_Y, minViewportWidth: 0 };
 
 // 是井 in the teal a verified well wears everywhere (VERDICT_COLOR); 不是井 keeps the page's own red
-const VERDICTS: { verdict: WellVerdict; label: string; color: string }[] = [
+const VERDICTS: { verdict: Verdict; label: string; color: string }[] = [
   { verdict: 'not-well', label: '不是井', color: 'bg-[#BC5646]' },
   { verdict: 'well', label: '是井', color: 'bg-[#62A4A7]' },
 ];
@@ -56,13 +52,23 @@ function InfoRow({ icon, text }: { icon: string; text: string }) {
   );
 }
 
-function VerdictButton({ label, color, selected, dimmed, onClick }: { label: string; color: string; selected: boolean; dimmed: boolean; onClick: () => void }) {
+interface VerdictButtonProps {
+  label: string;
+  color: string;
+  selected: boolean;
+  dimmed: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}
+
+function VerdictButton({ label, color, selected, dimmed, disabled, onClick }: VerdictButtonProps) {
   return (
     <button
       type="button"
       aria-pressed={selected}
+      disabled={disabled}
       onClick={onClick}
-      className={`h-[77px] w-[200px] text-[32px] font-bold text-[#FBFBF8] transition-all duration-300 ease-[var(--ease-expo)] hover:brightness-110 active:scale-[0.97] ${color} ${
+      className={`h-[77px] w-[200px] text-[32px] font-bold text-[#FBFBF8] transition-all duration-300 ease-[var(--ease-expo)] hover:brightness-110 active:scale-[0.97] disabled:cursor-not-allowed disabled:hover:brightness-100 ${color} ${
         selected ? 'shadow-[0_0_0_3px_rgba(251,251,248,0.85)]' : ''
       } ${dimmed ? 'opacity-45' : ''}`}
     >
@@ -71,10 +77,34 @@ function VerdictButton({ label, color, selected, dimmed, onClick }: { label: str
   );
 }
 
-function WellInfo({ record }: { record: CheckedWell }) {
+// What the line under the buttons says: saving, why it failed, the verdict given, or that viewers cannot give one
+function verdictNote(saving: boolean, error: string | null, chosen: string | undefined, allowed: boolean): string {
+  if (saving) return '儲存中…';
+  if (error) return error;
+  if (chosen) return `已標記為「${chosen}」`;
+  return allowed ? '' : '檢視者帳號無法驗證水井';
+}
+
+function WellInfo({ record }: { record: MapWell }) {
   // shared with the export page (and its counts on the map page): a verdict given here shows there, and the other way
   const verdict = verdictOf(record, useWellVerdicts());
   const chosen = VERDICTS.find((item) => item.verdict === verdict);
+  const { session } = useSiteChrome();
+  const allowed = session !== null && canVerify(session.role);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const choose = async (next: Verdict) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await saveVerdict(record, next);
+    } catch (failure) {
+      setError((failure as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div style={{ width: INFO_WIDTH }}>
@@ -97,12 +127,13 @@ function WellInfo({ record }: { record: CheckedWell }) {
             color={item.color}
             selected={verdict === item.verdict}
             dimmed={verdict !== null && verdict !== item.verdict}
-            onClick={() => setWellVerdict(record.id, item.verdict)}
+            disabled={!allowed || saving}
+            onClick={() => choose(item.verdict)}
           />
         ))}
       </div>
       <p aria-live="polite" className="mt-5 h-[30px] pl-px text-[22px] font-bold text-[#FBFBF8]/80">
-        {chosen ? `已標記為「${chosen.label}」` : ''}
+        {verdictNote(saving, error, chosen?.label, allowed)}
       </p>
     </div>
   );
@@ -110,9 +141,9 @@ function WellInfo({ record }: { record: CheckedWell }) {
 
 /* ─── Page ──────────────────────────────────────────────────────── */
 
-export default function CheckPage({ record, backHref }: { record: CheckedWell; backHref: string }) {
+export default function CheckPage({ view }: { view: CheckView }) {
+  const { well: record, task, captures, backHref } = view;
   const scale = useFitScale(OVERLAY_STAGE);
-  const sourceMap = findSourceMap(record.id);
   // the navbar's 水井檢查 comes back to the well checked last
   useEffect(() => rememberVisit('check', record.id), [record.id]);
 
@@ -121,7 +152,7 @@ export default function CheckPage({ record, backHref }: { record: CheckedWell; b
       <Background />
 
       {/* beside it, the map file the well was found in */}
-      <BackToMapLink href={backHref} transitionTypes={TO_MAP} mapFile={sourceMap} />
+      <BackToMapLink href={backHref} transitionTypes={TO_MAP} mapFile={task} />
 
       {/* lined up with the navbar left and right, centred in the height between the navbar and the window's bottom */}
       <div className="absolute flex items-center" style={{ ...pagePart('check-content'), top: CONTENT_TOP, bottom: PAGE_GAP, left: PAGE_GUTTER, right: PAGE_GUTTER }}>
@@ -132,11 +163,11 @@ export default function CheckPage({ record, backHref }: { record: CheckedWell; b
               <WellInfo key={record.id} record={record} />
             </div>
             <div className="self-start" style={{ zoom: scale }}>
-              <ExportEntry />
+              <ExportEntry recordId={task.id} />
             </div>
           </div>
           <div style={{ zoom: scale }}>
-            <TimelineCompare captures={CAPTURES} />
+            <TimelineCompare captures={captures} />
           </div>
         </div>
       </div>

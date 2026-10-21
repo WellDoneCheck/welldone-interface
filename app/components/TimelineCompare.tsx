@@ -3,14 +3,13 @@
 import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import Image from 'next/image';
 import SharedTransition, { FROM_EXPORT_SHARE, SHARED } from './SharedTransition';
-import { dayPeriodLabel, describeGap, formatDate, formatMonthDay, formatYear, type Capture } from '../data/captures';
+import { fileUrl } from '../utils/api';
+import { dayPeriodLabel, describeGap, formatDate, formatMonthDay, formatYear, type Capture } from '../utils/captures';
 
 const EASE = 'ease-[var(--ease-expo)] motion-reduce:transition-none';
 
 // The compared imagery is square; the film strip beside it is as tall as the image
 const IMAGE_SIZE = 702;
-// The placeholder tile has an empty strip along its bottom; only its top-left square (about 74%) holds imagery
-const TILE_CONTENT_SIZE = '135%';
 const KEY_STEP = 2;
 const KEY_STEP_LARGE = 10;
 
@@ -22,15 +21,6 @@ type Role = 'compare' | 'current';
 const ROLE_LABEL: Record<Role, string> = { compare: '比較', current: '目前' };
 const ROLE_COLOR: Record<Role, string> = { compare: 'bg-[#62A4A7]', current: 'bg-[#3F7A7E]' };
 
-// Fake difference between captures until real imagery is connected: the older the capture, the more it looks like an
-// old photo (a warmer, darker wash over it), so the two sides of the divider are easy to tell apart. A plain
-// see-through colour on top, not a CSS filter: a filter is worked out again whenever the image is painted, which a
-// page transition does on every frame for all fourteen images here.
-function captureTint(index: number, total: number): string {
-  const age = 1 - index / Math.max(total - 1, 1);
-  return `rgba(112, 80, 36, ${(age * 0.42).toFixed(2)})`;
-}
-
 const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
 
 /* ─── Compare view ──────────────────────────────────────────────── */
@@ -40,15 +30,17 @@ interface CompareViewProps {
   compareIndex: number;
 }
 
-// Square view of a capture's imagery (the tile's content square scaled up to fill the frame)
-function CaptureImage({ index, total, size }: { index: number; total: number; size: number }) {
+// Square photo of the well in a capture, centred on it (from the backend; the frame's colour where it has none)
+function CaptureImage({ capture }: { capture: Capture }) {
   return (
-    <div className="absolute inset-0 overflow-hidden">
-      <div className="absolute left-0 top-0" style={{ width: TILE_CONTENT_SIZE, height: TILE_CONTENT_SIZE }}>
-        <Image src="/aerial-tile.webp" unoptimized alt="" fill sizes={`${Math.round(size * 1.35)}px`} className="object-cover" draggable={false} />
-      </div>
-      <div className="absolute inset-0" style={{ background: captureTint(index, total) }} />
-    </div>
+    // eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address
+    <img
+      src={fileUrl(capture.image)}
+      alt=""
+      draggable={false}
+      className="absolute inset-0 h-full w-full object-cover"
+      onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
+    />
   );
 }
 
@@ -118,18 +110,18 @@ function CompareView({ captures, compareIndex }: CompareViewProps) {
         onPointerMove={onPointerMove}
       >
         {/* current capture underneath, compared capture clipped on top */}
-        <CaptureImage index={currentIndex} total={captures.length} size={IMAGE_SIZE} />
+        <CaptureImage capture={current} />
         <div className="absolute inset-0" style={{ clipPath: `inset(0 0 ${100 - position}% 0)` }}>
-          <CaptureImage index={compareIndex} total={captures.length} size={IMAGE_SIZE} />
+          <CaptureImage capture={compared} />
         </div>
 
-        {/* well marker, placed by % so it stays on the same spot of the square image */}
+        {/* well marker, its tip on the middle of the photo (where the well is), placed by % to stay there */}
         <Image
           src="/check/marker.svg"
           alt="水井位置"
           width={60}
           height={95}
-          className="pointer-events-none absolute left-[47.3%] top-[9.1%] h-auto w-[8.5%] max-w-none"
+          className="pointer-events-none absolute left-[43.35%] top-[45.54%] h-auto w-[8.5%] max-w-none"
         />
 
         <CompareTag role="compare" date={formatDate(compared.capturedAt)} className="top-4" />
@@ -212,7 +204,7 @@ function FilmFrame({ capture, index, total, role, period, onSelect }: FilmFrameP
       style={{ top: frameTop(index, total), left: FRAME_LEFT, height: FRAME_HEIGHT }}
     >
       <span className={`relative block shrink-0 overflow-hidden transition-all duration-300 ${EASE} ${border}`} style={{ width: FRAME_SIZE, height: FRAME_SIZE }}>
-        <CaptureImage index={index} total={total} size={FRAME_SIZE} />
+        <CaptureImage capture={capture} />
       </span>
 
       <span className="flex flex-col items-start">

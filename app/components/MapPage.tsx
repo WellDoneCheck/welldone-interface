@@ -20,10 +20,13 @@ import SharedTransition, {
 } from './SharedTransition';
 import BackToMapLink from './BackToMapLink';
 import CursorCoordinates from './CursorCoordinates';
-import type { MapWell, RecordItem } from '../data/mapRecords';
 import { mapHref } from '../utils/routeRecords';
 import { useWellVerdicts } from './useWellVerdicts';
-import { lookOf, VERDICT_COLOR, verdictOfWell, type VerdictLook } from '../utils/wellVerdicts';
+import { lookOf, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
+import { fileUrl } from '../utils/api';
+import type { NamedTask } from '../utils/tasks';
+import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
+import { wellImageUrl, type MapWell } from '../utils/wells';
 import { rememberVisit } from '../utils/lastVisit';
 import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, useViewportSize } from './pageFrame';
@@ -35,6 +38,8 @@ const OVERLAY_STAGE: FitStage = { width: 1920, height: CARD_HEIGHT, marginX: 0, 
 // The view tabs stick out this far past the card's right edge; the tabs' outer edge lines up with the navbar
 const TAB_OVERHANG = 55;
 const CARD_ID = 'well-card';
+// The aerial photo's side, in the card's pixels
+const PHOTO_SIZE = 640;
 
 // A pin (a square image whose tip is 85% of the way down) is this big at the page's scale, like in the Figma frame
 const PIN_SIZE = 90;
@@ -143,7 +148,7 @@ async function shadowedPins(): Promise<Record<string, Icon>> {
 }
 
 const wellFeatures = (wells: MapWell[], verdicts: ReturnType<typeof useWellVerdicts>) =>
-  pointFeatures(wells, (well) => ({ id: well.id, look: lookOf(verdictOfWell(well.id, verdicts)) }));
+  pointFeatures(wells, (well) => ({ id: well.id, look: lookOf(verdictOf(well, verdicts)) }));
 
 // The map's layer of pins: every well but the selected one (a page element), at the page's scale and smaller the
 // further out (pinScaleExpression). onHover: the well under the pointer, or null.
@@ -189,8 +194,9 @@ function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: 
 }
 
 interface MapCanvasProps {
-  // the wells of the imported map shown, one pin each
+  // the wells of the imported map shown, one pin each, over its imagery (null: not cut yet)
   wells: MapWell[];
+  imagery: Imagery | null;
   // null while no well is selected
   selected: MapWell | null;
   cardOpen: boolean;
@@ -211,7 +217,7 @@ interface MapCanvasProps {
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -222,7 +228,9 @@ function MapCanvas({ wells, selected, cardOpen, startsWithCard, startCamera, sta
   const selectedId = selected?.id;
 
   const map = useSurveyMap({
-    fit: stripFit(viewport, startsWithCard),
+    imagery,
+    // the whole imagery; while there is none yet (not cut), Taiwan
+    fit: stripFit(imagery?.bounds ?? TAIWAN_BOUNDS, viewport, startsWithCard),
     camera,
     // a picture of where the map is left with a well, for coming back to it from its check page
     onRestImage: selectedId ? (image) => rememberMapImage(selectedId, image) : undefined,
@@ -352,7 +360,7 @@ interface WellMarkerProps {
 // by its verification as the map's pins are: the pin image itself while not verified, its shape filled otherwise.
 function WellMarker({ record, corner, size, cardOpen, onClick }: WellMarkerProps) {
   const active = cardOpen;
-  const look = lookOf(verdictOfWell(record.id, useWellVerdicts()));
+  const look = lookOf(verdictOf(record, useWellVerdicts()));
   const pinClass = `relative h-auto w-full max-w-none drop-shadow-[0_6px_6px_rgba(0,0,0,0.35)] transition-transform duration-300 ${MOTION} group-hover:-translate-y-1.5 ${
     active ? '-translate-y-1.5 scale-110' : ''
   }`;
@@ -551,15 +559,16 @@ function ViewTab({ mode, label, top, color, active, onSelect }: ViewTabProps) {
   );
 }
 
-// Aerial: tile preview (will come from titiler).
+// Aerial: the well's photo, cut from its map by the backend.
 // Model: fake 3D render (click to generate), offset 4/6px inside the card as in Figma.
-function WellPhoto({ viewMode, wellId, shared, showing }: { viewMode: ViewMode; wellId: string; shared: boolean; showing: boolean }) {
-  if (viewMode === 'aerial') return <VerifyLink wellId={wellId} shared={shared} />;
+function WellPhoto({ viewMode, well, shared, showing }: { viewMode: ViewMode; well: MapWell; shared: boolean; showing: boolean }) {
+  if (viewMode === 'aerial') return <VerifyLink well={well} shared={shared} />;
   return <ModelRender playing={showing} />;
 }
 
 // The aerial photo is the way into the verification page for this well
-function VerifyLink({ wellId, shared }: { wellId: string; shared: boolean }) {
+function VerifyLink({ well, shared }: { well: MapWell; shared: boolean }) {
+  const wellId = well.id;
   return (
     <SharedTransition name={SHARED.wellPhoto} enabled={shared}>
       <Link
@@ -568,7 +577,15 @@ function VerifyLink({ wellId, shared }: { wellId: string; shared: boolean }) {
         aria-label={`驗證 ${wellId}：比對多期影像`}
         className="group relative block h-[640px] w-[640px] outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
       >
-        <Image src="/aerial-tile.webp" unoptimized alt="空拍縮圖" width={640} height={640} />
+        {/* eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address */}
+        <img
+          src={fileUrl(wellImageUrl(well, PHOTO_SIZE))}
+          alt="空拍縮圖"
+          width={PHOTO_SIZE}
+          height={PHOTO_SIZE}
+          // no photo (the well is outside its map's imagery): the card's paper shows instead of a broken image
+          onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
+        />
         <span
           className={`absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-8 opacity-0 transition-opacity duration-300 ${MOTION} group-hover:opacity-100 group-focus-visible:opacity-100`}
         >
@@ -601,7 +618,7 @@ function CardFace({ record, shared, faceMode, viewMode, showing, onViewModeChang
       className={`absolute inset-0 bg-[#F7F6F1] p-4 shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)] [backface-visibility:hidden] ${className}`}
     >
       <div className="h-[640px] w-[640px]">
-        <WellPhoto viewMode={faceMode} wellId={record.id} shared={shared} showing={showing} />
+        <WellPhoto viewMode={faceMode} well={record} shared={shared} showing={showing} />
       </div>
 
       <SharedTransition name={SHARED.wellId} enabled={shared}>
@@ -661,8 +678,9 @@ function InfoCard({ record, open, viewMode, onViewModeChange }: InfoCardProps) {
 
 interface MapPageProps {
   // the imported map shown, the wells recognised in it (one pin each), and the one selected on arrival (null: none)
-  mapFile: RecordItem;
+  mapFile: NamedTask;
   wells: MapWell[];
+  imagery: Imagery | null;
   well: MapWell | null;
   // Arriving with a well asked for: its card slides in shortly after
   openCardOnArrival: boolean;
@@ -670,7 +688,7 @@ interface MapPageProps {
   cardOpenAtStart: boolean;
 }
 
-export default function MapPage({ mapFile, wells, well: initialWell, openCardOnArrival, cardOpenAtStart }: MapPageProps) {
+export default function MapPage({ mapFile, wells, imagery, well: initialWell, openCardOnArrival, cardOpenAtStart }: MapPageProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('aerial');
   const [cardOpen, setCardOpen] = useState(cardOpenAtStart);
   const [selectedId, setSelectedId] = useState(initialWell?.id ?? null);
@@ -736,6 +754,7 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
     <div className="pointer-events-none relative h-screen overflow-hidden" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
       <MapCanvas
         wells={wells}
+        imagery={imagery}
         selected={record}
         cardOpen={cardOpen}
         startsWithCard={startsWithCard}
@@ -757,7 +776,7 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
       {/* in the bottom left corner, against the navbar's left edge, as on the compare page (and as large) */}
       <div className="pointer-events-auto absolute" style={{ ...pagePart('map-shortcuts'), left: PAGE_GUTTER, bottom: PAGE_GAP }}>
         <div className="flex gap-[12px]" style={{ zoom: cornerScale }}>
-          <ExportEntry />
+          <ExportEntry recordId={mapFile.id} />
           <CompareEntry recordId={mapFile.id} />
         </div>
       </div>

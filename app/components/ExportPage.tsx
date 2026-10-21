@@ -2,13 +2,18 @@
 
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useWellVerdicts } from './useWellVerdicts';
-import { lookOf, setWellVerdict, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
+import { canVerify, lookOf, saveVerdict, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useFitScale, type FitStage } from './useFitScale';
 import { NAVBAR_HEIGHT } from './pageFrame';
 import SharedTransition, { ExportPageTransition, FROM_EXPORT, FROM_EXPORT_SHARE, SHARED } from './SharedTransition';
-import { EXPORT_WELLS, formatCoordinates, type ExportWell, type WellVerdict } from '../data/exportWells';
+import LoadNotice from './LoadNotice';
+import { useSiteChrome } from './SiteChrome';
+import { useMapView } from './useMapView';
+import { usePageSearchParams } from './usePageSearchParams';
+import { fileUrl } from '../utils/api';
+import { wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
 import { buildWellsCsv } from '../utils/wellsCsv';
 import { downloadCsv } from '../utils/csv';
 
@@ -36,7 +41,7 @@ const SECTIONS: Record<SectionKind, { title: string; count: string; countColor: 
   pending: { title: '未驗證的水井', count: '未驗證 Pending', countColor: 'text-[#BC5646]' },
 };
 
-const VERDICT_BUTTONS: { verdict: WellVerdict; label: string; className: string }[] = [
+const VERDICT_BUTTONS: { verdict: Verdict; label: string; className: string }[] = [
   { verdict: 'not-well', label: '不是井', className: 'border-[4px] border-[#8A8F8C] text-[#5E625F]' },
   { verdict: 'well', label: '是井', className: 'bg-[#62A4A7] text-[#FBFBF8]' },
 ];
@@ -139,12 +144,13 @@ function InfoLine({ icon, text }: { icon: string; text: string }) {
 }
 
 interface WellCardProps {
-  well: ExportWell;
+  well: MapWell;
   selected: boolean;
   // this card's photo, id, coordinates and time move to the check page (only the card being opened: a name is unique)
   shared: boolean;
   onToggle: () => void;
-  onVerdict: (verdict: WellVerdict) => void;
+  // null: the user may not verify (a viewer)
+  onVerdict: ((verdict: Verdict) => void) | null;
   onOpen: () => void;
 }
 
@@ -166,13 +172,13 @@ function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellC
             className="group/photo absolute inset-0 block overflow-hidden outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
           >
             {/* once opened, the photo drops its hover look at once, so it flies to the check page as the bare capture */}
-            <Image
-              src="/export/well-tile.webp"
-              unoptimized
+            {/* eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address */}
+            <img
+              src={fileUrl(wellImageUrl(well, CARD_WIDTH))}
               alt={`${well.id} 空拍影像`}
-              fill
-              sizes="320px"
-              className={`object-cover ${shared ? '' : 'transition-transform duration-500 ease-[var(--ease-expo)] group-hover/photo:scale-[1.04]'}`}
+              loading="lazy"
+              onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
+              className={`absolute inset-0 h-full w-full object-cover ${shared ? '' : 'transition-transform duration-500 ease-[var(--ease-expo)] group-hover/photo:scale-[1.04]'}`}
             />
             <span
               className={`absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-[14px] opacity-0 transition-opacity duration-300 group-hover/photo:opacity-100 group-focus-visible/photo:opacity-100 ${
@@ -204,13 +210,13 @@ function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellC
         </SharedTransition>
         <div className="mt-[6px] flex flex-col gap-[3px] pl-[2px]">
           <SharedTransition name={SHARED.wellCoordinates} enabled={shared} share={FROM_EXPORT_SHARE}>
-            <InfoLine icon="/export/icon-location.png" text={formatCoordinates(well)} />
+            <InfoLine icon="/export/icon-location.png" text={well.coordinates} />
           </SharedTransition>
           <SharedTransition name={SHARED.wellTime} enabled={shared} share={FROM_EXPORT_SHARE}>
-            <InfoLine icon="/export/icon-clock.png" text={well.capturedAt} />
+            <InfoLine icon="/export/icon-clock.png" text={well.timestamp} />
           </SharedTransition>
         </div>
-        {well.verdict === null && (
+        {well.verdict === null && onVerdict && (
           <div className="mt-[20px] flex gap-[16px]">
             {VERDICT_BUTTONS.map((button) => (
               <button
@@ -268,11 +274,11 @@ function useRenderedCount(total: number): number {
 
 interface WellSectionProps {
   kind: SectionKind;
-  wells: ExportWell[];
+  wells: MapWell[];
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
   onToggleAll: (ids: string[], select: boolean) => void;
-  onVerdict: (id: string, verdict: WellVerdict) => void;
+  onVerdict: ((well: MapWell, verdict: Verdict) => void) | null;
   // the well being opened on the check page
   openingId: string | null;
   onOpen: (id: string) => void;
@@ -315,7 +321,7 @@ function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdic
               selected={selectedIds.has(well.id)}
               shared={openingId === well.id}
               onToggle={() => onToggle(well.id)}
-              onVerdict={(verdict) => onVerdict(well.id, verdict)}
+              onVerdict={onVerdict && ((verdict) => onVerdict(well, verdict))}
               onOpen={() => onOpen(well.id)}
             />
           ))}
@@ -364,12 +370,21 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
   const heroHeight = HERO_HEIGHT * scale;
   const paperMarker = useRef<HTMLDivElement>(null);
   const navLight = useNavLightPast(paperMarker);
-  // the placeholder wells with the verdicts given so far, here or on the check page (shared, so the sheet shows them
-  // again when it opens next time)
+  // the wells of the map the page was opened from (?record=; the newest finished map if none), with the verdicts
+  // given so far, here or on the check page
+  const loaded = useMapView(usePageSearchParams('/export').get('record'));
   const verdicts = useWellVerdicts();
-  const wells = useMemo(() => EXPORT_WELLS.map((well) => ({ ...well, verdict: verdictOf(well, verdicts) })), [verdicts]);
+  const fetched = loaded?.status === 'ready' ? loaded.value.wells : null;
+  const wells = useMemo(() => (fetched ?? []).map((well) => ({ ...well, verdict: verdictOf(well, verdicts) })), [fetched, verdicts]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [verdictError, setVerdictError] = useState<string | null>(null);
+  const { session } = useSiteChrome();
+
+  const giveVerdict = (well: MapWell, verdict: Verdict) => {
+    setVerdictError(null);
+    saveVerdict(well, verdict).catch((error: Error) => setVerdictError(`${well.id}：${error.message}`));
+  };
 
   const wellsOf = (kind: SectionKind) => wells.filter((well) => lookOf(well.verdict) === kind);
 
@@ -387,7 +402,9 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
       return next;
     });
 
-  const sectionProps = { selectedIds, onToggle: toggleWell, onToggleAll: toggleAll, onVerdict: setWellVerdict, openingId, onOpen: setOpeningId };
+  const onVerdict = session && canVerify(session.role) ? giveVerdict : null;
+  const sectionProps = { selectedIds, onToggle: toggleWell, onToggleAll: toggleAll, onVerdict, openingId, onOpen: setOpeningId };
+  if (loaded?.status !== 'ready') return <LoadNotice loaded={loaded} />;
 
   const content = (
     <div className="relative mx-auto w-[1920px] pb-[160px]" style={{ zoom: scale, paddingTop: inSheet ? TOP_SPACE.sheet : TOP_SPACE.page }}>
@@ -397,6 +414,11 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
         onExport={() => downloadCsv(CSV_FILE_NAME, buildWellsCsv(wells.filter((well) => selectedIds.has(well.id))))}
         onPaper={inSheet}
       />
+      {verdictError && (
+        <p role="alert" className="mx-[60px] mt-[24px] text-[20px] font-bold text-[#BC5646]">
+          {verdictError}
+        </p>
+      )}
       {SECTION_ORDER.map((kind) => (
         <WellSection key={kind} kind={kind} wells={wellsOf(kind)} {...sectionProps} />
       ))}

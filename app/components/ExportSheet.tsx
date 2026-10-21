@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useRouter } from 'next/navigation';
 import BottomSheet from './BottomSheet';
 import ExportPage from './ExportPage';
@@ -14,7 +15,10 @@ export default function ExportSheet() {
     // one layer on page changes: recedes when a well card flies from it to the check page (globals.css)
     <BottomSheet label="資料匯出" layerName="export-sheet" onClosed={() => router.back()}>
       <SheetCover>
-        <ExportPage inSheet />
+        {/* it reads its map from the address, which a static page only knows in the browser */}
+        <Suspense>
+          <ExportPage inSheet />
+        </Suspense>
       </SheetCover>
     </BottomSheet>
   );
