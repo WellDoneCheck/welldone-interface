@@ -1,27 +1,13 @@
 'use client';
 
-import { useCallback, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
-import Image from 'next/image';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import SharedTransition, { FROM_EXPORT_SHARE, SHARED } from './SharedTransition';
-import { fileUrl } from '../utils/api';
-import { dayPeriodLabel, describeGap, formatDate, formatMonthDay, formatYear, type Capture } from '../utils/captures';
-
-const EASE = 'ease-[var(--ease-expo)] motion-reduce:transition-none';
+import { CaptureImage, CompareSurface, EASE, EXPAND_PATH, ExpandedView, ButtonIcon, ImageButton, MarkerIcon, ROLE_COLOR, ROLE_LABEL, type Role } from './CompareImage';
+import { dayPeriodLabel, describeGap, formatMonthDay, formatYear, type Capture } from '../utils/captures';
 
 // The compared imagery is square; the film strip beside it is as tall as the image
 const IMAGE_SIZE = 702;
-const KEY_STEP = 2;
-const KEY_STEP_LARGE = 10;
-
-/* ─── Roles ─────────────────────────────────────────────────────── */
-
-// The newest capture is always the current one; any older capture can be picked to compare against it
-type Role = 'compare' | 'current';
-
-const ROLE_LABEL: Record<Role, string> = { compare: '比較', current: '目前' };
-const ROLE_COLOR: Record<Role, string> = { compare: 'bg-[#62A4A7]', current: 'bg-[#3F7A7E]' };
-
-const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
 
 /* ─── Compare view ──────────────────────────────────────────────── */
 
@@ -30,133 +16,49 @@ interface CompareViewProps {
   compareIndex: number;
 }
 
-// Square photo of the well in a capture, centred on it (from the backend; the frame's colour where it has none)
-function CaptureImage({ capture }: { capture: Capture }) {
-  return (
-    // eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address
-    <img
-      src={fileUrl(capture.image)}
-      alt=""
-      draggable={false}
-      className="absolute inset-0 h-full w-full object-cover"
-      onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
-    />
-  );
-}
-
-// Tag naming which side of the comparison an image half is, in the same colors as the timeline
-function CompareTag({ role, date, className }: { role: Role; date: string; className: string }) {
-  return (
-    <span className={`pointer-events-none absolute left-4 flex items-stretch text-[18px] font-bold leading-[32px] shadow-[0_2px_8px_rgba(0,0,0,0.25)] ${className}`}>
-      <span className={`px-3 text-white ${ROLE_COLOR[role]}`}>{ROLE_LABEL[role]}</span>
-      <span className="bg-[#2C322F]/70 px-3 text-white">{date}</span>
-    </span>
-  );
-}
-
-// Chevron on the divider grip, pointing the way the line can be dragged
-function GripChevron({ direction }: { direction: 'up' | 'down' }) {
-  return (
-    <svg width="12" height="8" viewBox="0 0 12 8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d={direction === 'up' ? 'M2 6.5 6 2.5l4 4' : 'M2 1.5l4 4 4-4'} />
-    </svg>
-  );
-}
-
-// Compared capture on top, current capture below, split by a line dragged up and down
+// The compare image in the page, and over the whole page when expanded: both show the same divider and marker
 function CompareView({ captures, compareIndex }: CompareViewProps) {
   const [position, setPosition] = useState(50);
+  const [markerShown, setMarkerShown] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const currentIndex = captures.length - 1;
-  const compared = captures[compareIndex];
-  const current = captures[currentIndex];
-
-  const moveTo = useCallback((clientY: number) => {
-    const surface = surfaceRef.current;
-    if (!surface) return;
-    const { top, height } = surface.getBoundingClientRect();
-    setPosition(clampPercent(((clientY - top) / height) * 100));
-  }, []);
-
-  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    moveTo(event.clientY);
-  };
-  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) moveTo(event.clientY);
-  };
-
-  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const step = event.shiftKey ? KEY_STEP_LARGE : KEY_STEP;
-    const moves: Record<string, (current: number) => number> = {
-      ArrowUp: (current) => current - step,
-      ArrowDown: (current) => current + step,
-      Home: () => 0,
-      End: () => 100,
-    };
-    const move = moves[event.key];
-    if (!move) return;
-    event.preventDefault();
-    setPosition((current) => clampPercent(move(current)));
-  };
+  const toggleMarker = () => setMarkerShown((shown) => !shown);
+  const measureOrigin = useCallback(() => surfaceRef.current?.getBoundingClientRect() ?? null, []);
+  const shared = { captures, compareIndex, position, onPosition: setPosition, markerShown };
 
   return (
-    <SharedTransition name={SHARED.wellPhoto} share={FROM_EXPORT_SHARE}>
-      <div
-        ref={surfaceRef}
-        className="group relative shrink-0 cursor-ns-resize touch-none select-none overflow-hidden bg-[#464A3A]"
-        style={{ width: IMAGE_SIZE, height: IMAGE_SIZE }}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-      >
-        {/* current capture underneath, compared capture clipped on top */}
-        <CaptureImage capture={current} />
-        <div className="absolute inset-0" style={{ clipPath: `inset(0 0 ${100 - position}% 0)` }}>
-          <CaptureImage capture={compared} />
-        </div>
-
-        {/* well marker, its tip on the middle of the photo (where the well is), placed by % to stay there */}
-        <Image
-          src="/check/marker.svg"
-          alt="水井位置"
-          width={60}
-          height={95}
-          className="pointer-events-none absolute left-[43.35%] top-[45.54%] h-auto w-[8.5%] max-w-none"
+    <>
+      <SharedTransition name={SHARED.wellPhoto} share={FROM_EXPORT_SHARE}>
+        <CompareSurface
+          {...shared}
+          surfaceRef={surfaceRef}
+          size={IMAGE_SIZE}
+          hidden={expanded}
+          buttons={
+            <>
+              <ImageButton label="放大檢視" onClick={() => setExpanded(true)}>
+                <ButtonIcon path={EXPAND_PATH} />
+              </ImageButton>
+              <ImageButton label={markerShown ? '隱藏水井定位標' : '顯示水井定位標'} pressed={markerShown} onClick={toggleMarker}>
+                <MarkerIcon shown={markerShown} />
+              </ImageButton>
+            </>
+          }
         />
-
-        <CompareTag role="compare" date={formatDate(compared.capturedAt)} className="top-4" />
-        <CompareTag role="current" date={formatDate(current.capturedAt)} className="bottom-4" />
-
-        {/* divider: a line in the timeline's colors with a grip in the middle */}
-        <div
-          className="pointer-events-none absolute inset-x-0 h-[3px] -translate-y-1/2 bg-gradient-to-b from-[#62A4A7] to-[#3F7A7E] shadow-[0_0_0_1px_rgba(255,255,255,0.7),0_2px_10px_rgba(0,0,0,0.35)]"
-          style={{ top: `${position}%` }}
-        />
-        <div
-          role="slider"
-          tabIndex={0}
-          aria-label="影像分割線"
-          aria-orientation="vertical"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(position)}
-          aria-valuetext={`${formatDate(compared.capturedAt)} 佔 ${Math.round(position)}%`}
-          onKeyDown={onKeyDown}
-          className={`absolute left-1/2 flex h-[30px] w-[72px] -translate-x-1/2 -translate-y-1/2 items-center justify-center gap-[6px] rounded-full border-2 border-white bg-[#2C322F] text-white shadow-[0_4px_14px_rgba(0,0,0,0.4)] outline-none transition-transform duration-300 ${EASE} group-active:scale-110 focus-visible:shadow-[0_0_0_3px_#62A4A7]`}
-          style={{ top: `${position}%` }}
-        >
-          <GripChevron direction="up" />
-          <span className="h-[14px] w-px bg-white/40" />
-          <GripChevron direction="down" />
-        </div>
-      </div>
-    </SharedTransition>
+      </SharedTransition>
+      {/* on the page's body: out of the page's scaled stage, over everything */}
+      {expanded &&
+        createPortal(
+          <ExpandedView {...shared} measureOrigin={measureOrigin} onToggleMarker={toggleMarker} onClose={() => setExpanded(false)} />,
+          document.body,
+        )}
+    </>
   );
 }
 
 /* ─── Film strip timeline ───────────────────────────────────────── */
 
-// Each capture is a frame of a vertical film strip beside the image, oldest at the top:
+// Each capture is a frame of a vertical film strip to the right of the image, oldest at the top:
 // a preview of that capture with its date to the right, and the compare bracket along the image edge.
 // Frames spread over the image height; when there are too many to fit, the strip scrolls.
 const STRIP_PADDING = 26;
@@ -253,7 +155,7 @@ function FilmStrip({ captures, compareIndex, onSelect }: FilmStripProps) {
   return (
     <div
       ref={scrollerRef}
-      className="relative shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain border-r border-[#E5E2D9] bg-[#F7F6F1] [scrollbar-color:rgba(44,50,47,0.3)_transparent] [scrollbar-width:thin]"
+      className="relative shrink-0 overflow-y-auto overflow-x-hidden overscroll-contain border-l border-[#E5E2D9] bg-[#F7F6F1] [scrollbar-color:rgba(44,50,47,0.3)_transparent] [scrollbar-width:thin]"
       style={{ width: STRIP_WIDTH, height: IMAGE_SIZE }}
     >
       <div className="relative" style={{ height: stripHeight(total) }}>
@@ -308,8 +210,8 @@ export default function TimelineCompare({ captures }: { captures: Capture[] }) {
       className="flex bg-white shadow-[0_0_0_1px_rgba(44,50,47,0.14),0_4px_20px_0_rgba(0,0,0,0.5),0_10px_28px_0_rgba(44,50,47,0.06)]"
       style={{ height: IMAGE_SIZE }}
     >
-      <FilmStrip captures={captures} compareIndex={compareIndex} onSelect={setCompareIndex} />
       <CompareView captures={captures} compareIndex={compareIndex} />
+      <FilmStrip captures={captures} compareIndex={compareIndex} onSelect={setCompareIndex} />
     </div>
   );
 }
