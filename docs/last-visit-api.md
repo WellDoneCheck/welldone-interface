@@ -3,9 +3,8 @@
 導覽列的「地圖檢視」「水井檢查」會帶使用者回到**自己上次看的地圖記錄／上次檢查的水井**；
 沒有造訪記錄，或記錄已過期，就不顯示該項。
 
-目前還沒有後端，前端先把記錄存在瀏覽器（`localStorage`，分帳號、12 小時失效，行為與本規格相同），
-實作集中在 `app/utils/lastVisit.ts`，測試在 `tests/lastVisit.test.mjs`。
-後端完成後，只需要把該檔改成呼叫下列 API。
+後端已依本規格實作（`GET /me/last-visits`、`PUT /me/last-visits/:page`，Backend-SPEC §4.7），
+前端在 `app/utils/lastVisit.ts` 呼叫：登入時讀一次，之後每次造訪寫回並先記在記憶體；測試在 `tests/lastVisit.test.mjs`。
 
 ## 規則
 

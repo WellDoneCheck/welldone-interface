@@ -1,127 +1,102 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { findSourceMap, mapHref, resolveCheckRoute, resolveMapRoute } from '../app/utils/routeRecords.ts';
-import {
-  defaultRecordName,
-  findWell,
-  getLatestFinishedRecord,
-  getLatestRecord,
-  importName,
-  MAP_RECORDS,
-  wellsOf,
-} from '../app/data/mapRecords.ts';
-import { EXPORT_WELLS } from '../app/data/exportWells.ts';
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const byStatus = (status) => MAP_RECORDS.filter((record) => record.status === status);
-const doneMap = byStatus('done').find((record) => record.id !== getLatestFinishedRecord().id);
-const doneWell = wellsOf(doneMap.id)[4];
-
-/* ─── Imported maps and their wells ─────────────────────────────── */
-
-test('imported maps are identified by uuid, apart from their wells', () => {
-  for (const record of MAP_RECORDS) assert.match(record.id, UUID);
-  assert.equal(new Set(MAP_RECORDS.map((record) => record.id)).size, MAP_RECORDS.length);
-  assert.equal(findWell(doneMap.id), undefined, 'a map is not a well');
-});
-
-test('a map has wells as far as it has been recognised', () => {
-  for (const record of byStatus('done')) assert.equal(wellsOf(record.id).length, 50);
-  for (const record of byStatus('recognizing')) assert.equal(wellsOf(record.id).length, Math.round((50 * record.current) / record.total));
-  for (const record of byStatus('cutting')) assert.equal(wellsOf(record.id).length, 0);
-});
-
-test('every well belongs to its map and has an id of its own', () => {
-  const wells = MAP_RECORDS.flatMap((record) => wellsOf(record.id));
-  assert.equal(new Set(wells.map((well) => well.id)).size, wells.length);
-  for (const record of MAP_RECORDS) for (const well of wellsOf(record.id)) assert.equal(well.recordId, record.id);
-  assert.equal(wellsOf(getLatestFinishedRecord().id)[0].id, 'SW-2023-A001');
-});
-
-test('the export page wells are the wells of the finished 2023 map', () => {
-  const wells = wellsOf(getLatestFinishedRecord().id);
-  assert.deepEqual(EXPORT_WELLS.map((well) => well.id), wells.map((well) => well.id));
-  for (const well of EXPORT_WELLS) assert.equal(well.mapRecordId, getLatestFinishedRecord().id);
-});
+import { loadCheckView, loadMapView, mapHref, resolveMapWell } from '../app/utils/routeRecords.ts';
 
 /* ─── Map page ──────────────────────────────────────────────────── */
 
+const backendTask = (id, ai_status) => ({ id, name: '2026-10-20 13:52', split_status: 'completed', ai_status, created_by_id: null, created_at: '2026-10-20T05:52:00.000Z' });
+const wellView = (id, code) => ({ id, code, task_id: 'done', verdict: null, confidence: 0.9, latitude: 23.8, longitude: 120.4 });
+const tilejson = { tiles: ['http://localhost:3000/tasks/done/tiles/{z}/{x}/{y}.png'], bounds: [120.3, 23.7, 120.5, 23.9], minzoom: 12, maxzoom: 22 };
+
+// Answers the backend's calls by path; a path left out answers 404
+function backend(answers) {
+  globalThis.fetch = async (url) => {
+    const path = new URL(url).pathname + new URL(url).search;
+    return path in answers ? new Response(JSON.stringify(answers[path]), { status: 200 }) : new Response('{"message":"Not Found"}', { status: 404 });
+  };
+}
+globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+
+test('map: shows the map asked for with its wells and imagery', async () => {
+  backend({ '/tasks': [backendTask('done', 'completed')], '/wells?taskId=done': [wellView(1, 'SW-2026-A001')], '/tasks/done/tiles/tilejson': tilejson });
+  const view = await loadMapView('done');
+  assert.equal(view.task.id, 'done');
+  assert.deepEqual(view.wells.map((well) => well.id), ['SW-2026-A001']);
+  assert.deepEqual(view.imagery, tilejson);
+});
+
+test('map: a map not cut yet opens without imagery', async () => {
+  backend({ '/tasks': [backendTask('cutting', 'waiting')], '/wells?taskId=cutting': [] });
+  const view = await loadMapView('cutting');
+  assert.equal(view.imagery, null);
+  assert.deepEqual(view.wells, []);
+});
+
+test('map: with no finished map there is nothing to show', async () => {
+  backend({ '/tasks': [backendTask('cutting', 'waiting')] });
+  await assert.rejects(loadMapView(null), /還沒有辨識完成的地圖/);
+});
+
+const routeWells = [{ id: 'SW-2026-A001', recordId: 'done' }, { id: 'SW-2026-A002', recordId: 'done' }];
+
 test('map: a map opened from the import page shows its wells with none selected', () => {
-  const view = resolveMapRoute(doneMap.id, null, null);
-  assert.equal(view.record.id, doneMap.id);
-  assert.equal(view.wells.length, 50);
-  assert.equal(view.well, null);
-  assert.equal(view.openCardOnArrival, false);
-  assert.equal(view.cardOpenAtStart, false);
+  assert.deepEqual(resolveMapWell(routeWells, null, null), { well: null, openCardOnArrival: false, cardOpenAtStart: false });
 });
 
 test('map: a well asked for is selected and its card opens on arrival', () => {
-  const view = resolveMapRoute(doneMap.id, doneWell.id, null);
-  assert.equal(view.well.id, doneWell.id);
+  const view = resolveMapWell(routeWells, 'SW-2026-A002', null);
+  assert.equal(view.well.id, 'SW-2026-A002');
   assert.equal(view.openCardOnArrival, true);
   assert.equal(view.cardOpenAtStart, false);
 });
 
 test('map: coming back from the check page opens the card at once', () => {
-  assert.equal(resolveMapRoute(doneMap.id, doneWell.id, 'check').cardOpenAtStart, true);
+  assert.equal(resolveMapWell(routeWells, 'SW-2026-A002', 'check').cardOpenAtStart, true);
 });
 
 test('map: a well of another map is not selected', () => {
-  const other = wellsOf(getLatestFinishedRecord().id)[0];
-  assert.equal(resolveMapRoute(doneMap.id, other.id, 'check').well, null);
-});
-
-test('map: a map still being cut opens with no pins', () => {
-  const view = resolveMapRoute(byStatus('cutting')[0].id, null, null);
-  assert.deepEqual(view.wells, []);
-  assert.equal(view.well, null);
-});
-
-test('map: no or unknown map falls back to the newest finished map', () => {
-  for (const id of [null, 'no-such-map']) {
-    const view = resolveMapRoute(id, null, 'check');
-    assert.equal(view.record.id, getLatestFinishedRecord().id);
-    assert.equal(view.cardOpenAtStart, false);
-  }
+  assert.equal(resolveMapWell(routeWells, 'SW-2023-A001', 'check').well, null);
 });
 
 /* ─── Check page ────────────────────────────────────────────────── */
 
-test('check: a well links back to its pin in its map with the card open', () => {
-  const view = resolveCheckRoute(doneWell.id);
-  assert.equal(view.record.id, doneWell.id);
-  assert.equal(view.backHref, `/map?record=${doneMap.id}&well=${doneWell.id}&from=check`);
-  assert.equal(view.backHref, `${mapHref(doneWell)}&from=check`);
+const timeline = [
+  { task_id: 'older', task_created_at: '2025-03-01T02:00:00.000Z', well: { id: 9, code: 'SW-2025-A004', verdict: null, distance_m: 2.4 } },
+  { task_id: 'done', task_created_at: '2026-10-20T05:52:00.000Z', well: { id: 2, code: 'SW-2026-A002', verdict: null, distance_m: 0 } },
+];
+
+test('check: a well is read by its code, with its map and its captures in every map', async () => {
+  backend({
+    '/wells/code/SW-2026-A002': wellView(2, 'SW-2026-A002'),
+    '/tasks/done': backendTask('done', 'completed'),
+    '/wells/2/timeline': timeline,
+  });
+  const view = await loadCheckView('SW-2026-A002');
+  assert.equal(view.well.id, 'SW-2026-A002');
+  assert.equal(view.task.id, 'done');
+  assert.deepEqual(view.captures, [
+    { id: 'older', capturedAt: '2025-03-01 10:00', image: '/wells/9/image?size=702' },
+    { id: 'done', capturedAt: '2026-10-20 13:52', image: '/wells/2/image?size=702' },
+  ]);
 });
 
-test('check: an export page well links back to its pin in the map it came from', () => {
-  const well = EXPORT_WELLS[42];
-  assert.equal(resolveCheckRoute(well.id).backHref, `/map?record=${well.mapRecordId}&well=${well.id}&from=check`);
+test('check: the way back is to the well in its map, with its card already open', async () => {
+  backend({ '/wells/code/SW-2026-A002': wellView(2, 'SW-2026-A002'), '/tasks/done': backendTask('done', 'completed'), '/wells/2/timeline': timeline });
+  const view = await loadCheckView('SW-2026-A002');
+  assert.equal(view.backHref, '/map?record=done&well=SW-2026-A002&from=check');
+  assert.equal(view.backHref, `${mapHref(view.well)}&from=check`);
 });
 
-test('check: no or unknown well falls back to the first well of the newest finished map', () => {
-  for (const id of [null, 'no-such-well']) assert.equal(resolveCheckRoute(id).record.id, 'SW-2023-A001');
+test('check: without a well, the first well of the newest finished map', async () => {
+  backend({
+    '/tasks': [backendTask('done', 'completed')],
+    '/wells?taskId=done': [wellView(1, 'SW-2026-A001'), wellView(2, 'SW-2026-A002')],
+    '/wells/1/timeline': [],
+  });
+  assert.equal((await loadCheckView(null)).well.id, 'SW-2026-A001');
 });
 
-test('a well is found in the map it came from', () => {
-  assert.equal(findSourceMap(doneWell.id).id, doneMap.id);
-  assert.equal(findSourceMap('no-such-well'), undefined);
-});
-
-/* ─── Names ─────────────────────────────────────────────────────── */
-
-test('an imported map is named after when it came in, not after its wells', () => {
-  assert.equal(defaultRecordName(getLatestRecord()), '2023/10/11 16:40 匯入');
-  assert.equal(importName('2026-09-30 14:32:05'), '2026/09/30 14:32 匯入');
-});
-
-test('maps imported on the same day get different names', () => {
-  const names = MAP_RECORDS.map(defaultRecordName);
-  assert.equal(new Set(names).size, names.length);
-});
-
-test('the latest map is still the first one listed, though it has no wells yet', () => {
-  assert.equal(getLatestRecord().id, MAP_RECORDS[0].id);
-  assert.equal(getLatestRecord().status, 'cutting');
-  assert.equal(getLatestFinishedRecord().status, 'done');
+test('check: an unknown well says so', async () => {
+  backend({});
+  await assert.rejects(loadCheckView('SW-1999-Z999'), /Not Found/);
 });

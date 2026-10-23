@@ -2,8 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildWellsCsv } from '../app/utils/wellsCsv.ts';
 
-const verified = { id: 'SW-2023-A001', latitude: 23.456, longitude: 120.123, capturedAt: '2023-10-01 14:30', verdict: 'well' };
-const pending = { id: 'SW-2023-A002', latitude: 23.5, longitude: 120.1, capturedAt: '2023-10-02 14:30', verdict: null };
+const verified = { id: 'SW-2023-A001', latitude: 23.456, longitude: 120.123, timestamp: '2023-10-01 14:30', verdict: 'well' };
+const pending = { id: 'SW-2023-A002', latitude: 23.5, longitude: 120.1, timestamp: '2023-10-02 14:30', verdict: null };
 
 function lines(csv) {
   return csv.replace(/^﻿/, '').split('\r\n');

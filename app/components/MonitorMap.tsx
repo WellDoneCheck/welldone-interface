@@ -6,18 +6,21 @@ import type { Map as MapLibreMap } from 'maplibre-gl';
 import TileMap, { useMapProject, type Bounds } from './TileMap';
 import { STATUS_META, type WellMarker, type WellStatus } from '../data/monitor';
 import { useSiteChrome } from './SiteChrome';
-import { IMAGERY_BOUNDS } from '../data/xizhouImagery';
+import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
 
 // the light control panels over the map, as on the rest of the monitor page (no backdrop blur: over a map being dragged
 // it would be worked out again on every frame)
 const OVERLAY = 'border border-[#2C322F]/10 bg-[#F7F6F1]/[0.94] shadow-[0_4px_16px_rgba(0,0,0,0.18)]';
 
-// The whole strip, clear of the filter tabs above and the selected well's panel below (in the panel's own pixels)
-const PANEL_FIT = { bounds: IMAGERY_BOUNDS as Bounds, padding: { top: 70, bottom: 190, left: 24, right: 64 } };
+// The padding that keeps the imagery clear of the filter tabs above and the selected well's panel below (in the panel's
+// own pixels)
+const PANEL_PADDING = { top: 70, bottom: 190, left: 24, right: 64 };
 // Zooming in stops at a single well's surroundings
 const ZOOM_IN_LIMIT = 21;
 
 interface MonitorMapProps {
+  // the newest finished map's imagery (null: none yet, or logged out) and its wells
+  imagery: Imagery | null;
   markers: WellMarker[];
   // wells per status, for the filter counts
   totals: Record<WellStatus, number>;
@@ -116,7 +119,7 @@ function SelectedWell({ marker }: { marker: WellMarker }) {
         </div>
       </div>
       <div className="flex shrink-0 flex-col items-end gap-2">
-        <p className="text-4xl font-semibold leading-none text-[#2C322F]">{marker.confidence}%</p>
+        <p className="text-4xl font-semibold leading-none text-[#2C322F]">{marker.confidence === null ? '—' : `${marker.confidence}%`}</p>
         <p className="text-xs text-[#2C322F]/50">辨識信賴度</p>
         <Link
           href={`/check?record=${marker.recordId}`}
@@ -184,20 +187,20 @@ function ZoomControls({ map, fit }: { map: MapLibreMap | null; fit: { bounds: Bo
   );
 }
 
-// The survey map (tiles from titiler), dragged and zoomed inside the panel, with a marker on every well. Anyone sees the
+// The newest finished map's imagery (once logged in: the backend's tiles need it), dragged and zoomed inside the panel, with a marker on every well. Anyone sees the
 // markers; picking one (its details, the way to verify it) asks to log in first, then picks it.
-export default function MonitorMap({ markers, totals, filter, onFilterChange, selectedId, onSelect, scale }: MonitorMapProps) {
+export default function MonitorMap({ imagery, markers, totals, filter, onFilterChange, selectedId, onSelect, scale }: MonitorMapProps) {
   const [map, setMap] = useState<MapLibreMap | null>(null);
   const { isLoggedIn, requireLogin } = useSiteChrome();
   const selected = isLoggedIn ? (markers.find((marker) => marker.recordId === selectedId) ?? markers[0]) : null;
   const shown = markers.filter((marker) => filter === null || marker.status === filter);
-  const { top, bottom, left, right } = PANEL_FIT.padding;
-  const fit = { bounds: PANEL_FIT.bounds, padding: { top: top * scale, bottom: bottom * scale, left: left * scale, right: right * scale } };
+  const { top, bottom, left, right } = PANEL_PADDING;
+  const fit = { bounds: (imagery?.bounds ?? TAIWAN_BOUNDS) as Bounds, padding: { top: top * scale, bottom: bottom * scale, left: left * scale, right: right * scale } };
 
   return (
     <section aria-label="水井地圖" className="relative h-full w-[628px] shrink-0 overflow-hidden border border-[#2C322F]/10 bg-[#F7F6F1] shadow-[8px_8px_40px_0_rgba(0,0,0,0.25)]">
       <div className="absolute inset-0" style={{ zoom: 1 / scale }}>
-        <TileMap fit={fit} interactive onReady={setMap}>
+        <TileMap imagery={imagery} fit={fit} interactive onReady={setMap}>
           {({ project }) =>
             shown.map((marker) => (
               <MarkerDot
@@ -218,7 +221,8 @@ export default function MonitorMap({ markers, totals, filter, onFilterChange, se
 
       <ZoomControls map={map} fit={fit} />
 
-      {selected ? <SelectedWell marker={selected} /> : <LockedWell onLogin={() => requireLogin(() => {})} />}
+      {selected && <SelectedWell marker={selected} />}
+      {!isLoggedIn && <LockedWell onLogin={() => requireLogin(() => {})} />}
     </section>
   );
 }

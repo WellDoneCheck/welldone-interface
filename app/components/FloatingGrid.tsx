@@ -3,12 +3,16 @@
 import { useRef, useEffect } from 'react';
 import Link from 'next/link';
 import SharedTransition, { ONLY_TO_MONITOR, SHARED, TO_MONITOR } from './SharedTransition';
-import { RECOGNITION_ACCURACY, WELL_TOTALS } from '../data/monitor';
+import { useMonitorStats } from './useMonitorStats';
+import { WELL_TOTALS } from '../data/monitor';
+import { accuracyText, monitorFigures } from '../utils/monitorStats';
 
 export default function FloatingGrid() {
   const sectionRef = useRef<HTMLDivElement>(null);
   const leftColRef = useRef<HTMLDivElement>(null);
   const rightColRef = useRef<HTMLDivElement>(null);
+  // the backend's figures once logged in (read once: paused), the simulated ones until then
+  const stats = monitorFigures(useMonitorStats(true), WELL_TOTALS);
 
   const scrollData = useRef({
     current: 0,
@@ -90,8 +94,8 @@ export default function FloatingGrid() {
               {/* flies into the monitor page's accuracy card; hugging the figure so it lands at its size there */}
               <SharedTransition name={SHARED.recognitionAccuracy} share={ONLY_TO_MONITOR}>
                 <span className="inline-block">
-                  {RECOGNITION_ACCURACY}
-                  <span className="text-[0.42em] text-[#62A4A7]">%</span>
+                  {accuracyText(stats.accuracy)}
+                  {stats.accuracy !== null && <span className="text-[0.42em] text-[#62A4A7]">%</span>}
                 </span>
               </SharedTransition>
             </h2>
@@ -99,7 +103,7 @@ export default function FloatingGrid() {
             <div className="mt-8 max-w-sm border-l-2 border-[#62A4A7]/50 pl-6">
               <p className="text-[10px] uppercase tracking-[0.3em] leading-relaxed text-[#2C322F]/50">Aerial Imagery / Deep Learning</p>
               <p className="mt-3 text-sm leading-relaxed text-[#6F7468]">
-                從空拍影像自動找出水井，已驗證 {WELL_TOTALS.verified.toLocaleString()} 口、待驗證 {WELL_TOTALS.pending} 口，加速合法水井的登記與清查。
+                從空拍影像自動找出水井，已驗證 {stats.wells.verified.toLocaleString()} 口、待驗證 {stats.wells.pending.toLocaleString()} 口，加速合法水井的登記與清查。
               </p>
             </div>
             <Link

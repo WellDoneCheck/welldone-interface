@@ -5,15 +5,11 @@ import InlineNameInput from './InlineNameInput';
 import SharedTransition, { ONLY_TO_MONITOR, SHARED } from './SharedTransition';
 import {
   LEVEL_META,
-  RECOGNITION_ACCURACY,
   TASK_META,
-  TREND,
-  TREND_FIRST_DAY,
   TREND_TARGET,
-  VERIFIED_THIS_WEEK,
   type Level,
-  type WellStatus,
 } from '../data/monitor';
+import { accuracyText, type MonitorStats } from '../utils/monitorStats';
 import {
   CPU_HISTORY_LENGTH,
   currentCpu,
@@ -260,10 +256,11 @@ function StatTile({ label, note, children }: { label: string; note: string; chil
   );
 }
 
-export function StatTiles({ totals }: { totals: Record<WellStatus, number> }) {
+export function StatTiles({ stats }: { stats: MonitorStats }) {
+  const totals = stats.wells;
   return (
     <div className="grid h-[236px] shrink-0 grid-cols-2 grid-rows-2 gap-3">
-      <StatTile label="已驗證水井" note={`本週 +${VERIFIED_THIS_WEEK}`}>
+      <StatTile label="已驗證水井" note={`本週 +${stats.verifiedThisWeek}`}>
         {totals.verified.toLocaleString()}
       </StatTile>
       <StatTile label="待確認" note="需人工複核">
@@ -279,8 +276,9 @@ export function StatTiles({ totals }: { totals: Record<WellStatus, number> }) {
         {/* the home page's big figure flies in here */}
         <SharedTransition name={SHARED.recognitionAccuracy} share={ONLY_TO_MONITOR}>
           <p className="w-fit">
-            {RECOGNITION_ACCURACY}
-            <span className={`ml-0.5 text-[24px] ${INK_2}`}>%</span>
+            {/* none verified yet: no accuracy to tell */}
+            {accuracyText(stats.accuracy)}
+            {stats.accuracy !== null && <span className={`ml-0.5 text-[24px] ${INK_2}`}>%</span>}
           </p>
         </SharedTransition>
       </StatTile>
@@ -290,7 +288,7 @@ export function StatTiles({ totals }: { totals: Record<WellStatus, number> }) {
 
 /* ─── Trend ─────────────────────────────────────────────────────── */
 
-export function TrendPanel() {
+export function TrendPanel({ trend }: { trend: MonitorStats['trend'] }) {
   return (
     <Panel
       title="每日驗證數"
@@ -304,7 +302,7 @@ export function TrendPanel() {
       }
     >
       <div className="px-5 pb-3">
-        <TrendChart data={TREND} target={TREND_TARGET} firstDay={TREND_FIRST_DAY} />
+        <TrendChart data={trend.counts} target={TREND_TARGET} firstDay={trend.firstDay} />
       </div>
     </Panel>
   );
@@ -369,22 +367,25 @@ function TaskIcon({ task }: { task: LiveTask }) {
   );
 }
 
+// A real batch has no pace (rate 0) nor wells found, and no image count until its progress has been read
 function TaskProgress({ task }: { task: LiveTask }) {
   const images = `${task.processed.toLocaleString()} / ${task.images.toLocaleString()} 張`;
+  const total = task.images ? `・${task.images.toLocaleString()} 張` : '';
   if (task.state === 'running') {
     return (
       <div className="mt-2 flex items-center gap-3">
-        <Meter percent={(task.processed / task.images) * 100} color="#62A4A7" label={`${taskName(task)}辨識進度`} />
+        <Meter percent={task.images ? (task.processed / task.images) * 100 : 0} color="#62A4A7" label={`${taskName(task)}辨識進度`} />
         <span className={`shrink-0 text-xs tabular-nums ${INK_2}`}>
-          {images}・約 {minutesLeft(task)} 分鐘
+          {images}
+          {task.rate > 0 && `・約 ${minutesLeft(task)} 分鐘`}
         </span>
       </div>
     );
   }
   const summary = {
-    queued: `等待辨識・${task.images.toLocaleString()} 張`,
-    failed: `${task.error}・停在 ${images}`,
-    done: `找到 ${task.found} 口水井・${task.images.toLocaleString()} 張`,
+    queued: `等待辨識${total}`,
+    failed: task.images ? `${task.error}・停在 ${images}` : task.error,
+    done: task.found === undefined ? `已完成${total}` : `找到 ${task.found} 口水井${total}`,
   }[task.state];
   return <p className={`mt-1 text-xs ${task.state === 'failed' ? INK_2 : MUTED}`}>{summary}</p>;
 }

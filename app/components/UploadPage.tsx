@@ -3,9 +3,10 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { YEAR_GROUPS, type RecordItem, type RecordStatus } from '../data/mapRecords';
-import { recordName, renameRecord } from '../utils/recordNames';
-import { useRecordNames } from './RecordName';
+import { uploadInChunks } from '../utils/chunkedUpload';
+import { canDelete, canRename, canRetry, canUpload, displayName, groupByYear, uploadError, type RecordStatus, type TaskRecord } from '../utils/tasks';
+import { useTaskRecords } from './useTaskRecords';
+import { useSiteChrome } from './SiteChrome';
 import { useFitScale, type FitStage } from './useFitScale';
 import SharedTransition, {
   ONLY_TO_UPLOAD,
@@ -24,14 +25,36 @@ import { CONTENT_TOP, FRAME_MARGIN_X, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, use
 // From xl (1280px) up the panels then stretch to fill that area; below it they stack at their own size.
 const UPLOAD_STAGE: FitStage = { width: 1784, height: 869, marginX: FRAME_MARGIN_X, marginY: FRAME_MARGIN_Y, minViewportWidth: 1280 };
 
+// the drop zone and file list fold away (FOLD_TIME) before an upload's progress takes their place; once it is done,
+// the progress stays at 100% for DONE_PAUSE before they open again
+const FOLD_TIME = 500;
+const DONE_PAUSE = 800;
+// the big progress bar's flowing dashes
+const SENDING_STRIPES = 'repeating-linear-gradient(90deg, #3F7A7E 0 12px, #73BAC0 12px 24px)';
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /* ─── Types ─────────────────────────────────────────────────────── */
 
 interface UploadFile {
   id: string;
-  name: string;
-  size: number;
+  file: File;
   progress: number;
   status: 'pending' | 'uploading' | 'done' | 'error';
+  // bytes of this file sent so far (for the overall progress and speed)
+  loaded?: number;
+  // the resumable upload's id, kept so a retry resumes rather than restarts
+  uploadId?: string;
+  // why it was not uploaded
+  error?: string;
+  // the backend would refuse this file's format (§5), so it is marked failed before any upload and never retried
+  rejected?: boolean;
+}
+
+// A file the next upload will send: a new one, or one that failed at runtime (not a format rejection). A runtime
+// failure resumes from its uploadId when the backend already holds chunks, or starts over when it has none.
+function isUploadable(file: UploadFile): boolean {
+  return file.status === 'pending' || (file.status === 'error' && !file.rejected);
 }
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
@@ -41,6 +64,10 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatSeconds(seconds: number): string {
+  return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 
 function randomId(): string {
@@ -56,11 +83,13 @@ const STATUS_STYLES: Record<
   done: { dot: 'bg-emerald-400', bar: 'bg-emerald-400' },
   recognizing: { dot: 'bg-amber-400', bar: 'bg-amber-400' },
   cutting: { dot: 'bg-blue-400', bar: 'bg-blue-400' },
+  waiting: { dot: 'bg-white/60', bar: 'bg-white/60' },
+  failed: { dot: 'bg-[#E5534B]', bar: 'bg-[#E5534B]' },
 };
 
 /* ─── RecordRow component ───────────────────────────────────────── */
 
-function RecordRow({ record, name }: { record: RecordItem; name: string }) {
+function RecordRow({ record, name }: { record: TaskRecord; name: string }) {
   const styles = STATUS_STYLES[record.status];
 
   return (
@@ -93,9 +122,11 @@ function RecordRow({ record, name }: { record: RecordItem; name: string }) {
             </div>
 
             <div className="flex flex-col items-end gap-1">
-              <div className="text-base leading-4 text-white/70">
-                ({record.current}/{record.total})
-              </div>
+              {record.tiles && (
+                <div className="text-base leading-4 text-white/70">
+                  ({record.tiles.done}/{record.tiles.total})
+                </div>
+              )}
               <div className="flex items-center gap-1.5">
                 <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${styles.dot}`} />
                 <span className="text-xl leading-5 text-white">{record.statusLabel}</span>
@@ -142,6 +173,12 @@ const RenameIcon = () => (
     <path d="m13 7 4 4" />
   </svg>
 );
+const RetryIcon = () => (
+  <svg {...TRAY_ICON_PROPS}>
+    <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+    <path d="M20 4v7h-7" />
+  </svg>
+);
 const DeleteIcon = () => (
   <svg {...TRAY_ICON_PROPS}>
     <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />
@@ -149,21 +186,28 @@ const DeleteIcon = () => (
 );
 
 interface RecordTrayProps {
-  record: RecordItem;
+  record: TaskRecord;
   name: string;
+  // what the user may do to it (buttons for the rest are left out)
+  renamable: boolean;
+  deletable: boolean;
+  // its recognition can be retried (it stopped with tiles left) and the user may
+  retriable: boolean;
   mode: TrayMode;
   onModeChange: (mode: TrayMode) => void;
   onRename: (name: string) => void;
   onDelete: () => void;
+  onRetry: () => void;
 }
 
 // Contents of the tray: the action list, the rename form or the delete confirmation
-function RecordTray({ record, name, mode, onModeChange, onRename, onDelete }: RecordTrayProps) {
+function RecordTray({ record, name, renamable, deletable, retriable, mode, onModeChange, onRename, onDelete, onRetry }: RecordTrayProps) {
   const [draft, setDraft] = useState(name);
 
   if (mode === 'rename') {
     const save = () => {
-      if (draft.trim()) onRename(draft.trim());
+      // saved only when changed: the shown default name ('… 匯入') is not the name itself
+      if (draft.trim() && draft.trim() !== name) onRename(draft.trim());
       onModeChange('actions');
     };
     return (
@@ -212,16 +256,19 @@ function RecordTray({ record, name, mode, onModeChange, onRename, onDelete }: Re
         <MapIcon />
         開啟地圖
       </Link>
-      <TrayButton label="重新命名" icon={<RenameIcon />} onClick={() => onModeChange('rename')} />
+      {renamable && <TrayButton label="重新命名" icon={<RenameIcon />} onClick={() => onModeChange('rename')} />}
+      {retriable && <TrayButton label="重試辨識" icon={<RetryIcon />} onClick={onRetry} />}
       <span className="ml-auto" />
-      <TrayButton label="刪除" icon={<DeleteIcon />} tone="danger" onClick={() => onModeChange('confirm-delete')} />
+      {deletable && <TrayButton label="刪除" icon={<DeleteIcon />} tone="danger" onClick={() => onModeChange('confirm-delete')} />}
     </div>
   );
 }
 
 // A record with its action tray, which slides out below it on hover or keyboard focus
 // and stays open while renaming or confirming a delete
-function RecordEntry({ record, name, onRename, onDelete }: { record: RecordItem; name: string; onRename: (name: string) => void; onDelete: () => void }) {
+type RecordEntryProps = Pick<RecordTrayProps, 'record' | 'name' | 'renamable' | 'deletable' | 'retriable' | 'onRename' | 'onDelete' | 'onRetry'>;
+
+function RecordEntry({ record, name, renamable, deletable, retriable, onRename, onDelete, onRetry }: RecordEntryProps) {
   const [mode, setMode] = useState<TrayMode>('actions');
   const pinnedOpen = mode !== 'actions';
 
@@ -239,7 +286,19 @@ function RecordEntry({ record, name, onRename, onDelete }: { record: RecordItem;
               pinnedOpen ? 'translate-y-0 opacity-100' : '-translate-y-3 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:translate-y-0 group-focus-within:opacity-100'
             }`}
           >
-            <RecordTray key={mode} record={record} name={name} mode={mode} onModeChange={setMode} onRename={onRename} onDelete={onDelete} />
+            <RecordTray
+              key={mode}
+              record={record}
+              name={name}
+              renamable={renamable}
+              deletable={deletable}
+              retriable={retriable}
+              mode={mode}
+              onModeChange={setMode}
+              onRename={onRename}
+              onDelete={onDelete}
+              onRetry={onRetry}
+            />
           </div>
         </div>
       </div>
@@ -387,40 +446,46 @@ function FileRow({ file, index, onRemove }: { file: UploadFile; index: number; o
   const progress = isDone ? 100 : file.status === 'uploading' ? file.progress : 0;
 
   return (
-    <div className="relative flex h-[61px] items-start px-0.5">
+    <div
+      className={`relative flex h-[61px] items-start px-0.5 motion-reduce:animate-none ${
+        isDone ? 'animate-[upload-done-flash_2s_ease-out_both]' : 'animate-[upload-file-in_400ms_ease-out_both]'
+      }`}
+    >
       <span className="mt-[19px] w-[33px] text-xl leading-[23px] text-[#6F7468]" style={{ fontFamily: 'var(--font-geist-sans), sans-serif' }}>
         {String(index + 1).padStart(2, '0')}
       </span>
 
       <div className="mt-3 w-[406px] shrink-0">
-        <p className="truncate text-[23px] leading-[33px] text-[#2C322F]">{file.name}</p>
+        <p className="truncate text-[23px] leading-[33px] text-[#2C322F]">{file.file.name}</p>
         <div className="relative mt-[5px] h-[1.5px]">
           <Image src="/upload/progress-track.svg" alt="" width={406} height={2} className="absolute inset-0 h-[1.5px] w-full" />
           {!hasError && progress > 0 && (
-            <Image
-              src="/upload/progress-fill.svg"
-              alt=""
-              width={303}
-              height={2}
-              className="absolute inset-y-0 left-0 h-[1.5px]"
-              style={{ width: `${progress}%` }}
-            />
+            <div className="absolute inset-y-0 left-0 h-[1.5px]" style={{ width: `${progress}%` }}>
+              <Image src="/upload/progress-fill.svg" alt="" width={303} height={2} className="absolute inset-0 h-[1.5px] w-full" />
+              {file.status === 'uploading' && (
+                <>
+                  {/* teal dashes flowing to the right, with a glowing head at the leading edge */}
+                  <span className="absolute inset-0 bg-[repeating-linear-gradient(90deg,transparent_0_12px,rgba(255,255,255,0.65)_12px_24px)] animate-[upload-stripes_1s_linear_infinite] motion-reduce:animate-none" />
+                  <span className="absolute right-0 top-1/2 h-2 w-2 rounded-full bg-[#73BAC0] shadow-[0_0_10px_3px_rgba(115,186,192,0.9)] animate-[upload-glow_1s_ease-in-out_infinite] motion-reduce:animate-none" />
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>
 
-      {!hasError && <span className="ml-3.5 mt-[19px] w-[75px] text-base leading-[23px] text-[#6F7468]">{formatSize(file.size)}</span>}
+      {!hasError && <span className="ml-3.5 mt-[19px] w-[75px] text-base leading-[23px] text-[#6F7468]">{formatSize(file.file.size)}</span>}
 
       <div className="ml-auto mt-[19px] flex items-center gap-4 text-base leading-[23px]">
         {hasError ? (
           <>
-            <span className="text-[#98412F]">格式錯誤</span>
+            <span className="max-w-[150px] truncate text-[#98412F]" title={file.error}>{file.error}</span>
             <button type="button" onClick={() => onRemove(file.id)} className="text-[#6F7468] underline hover:text-[#98412F]">
               移除
             </button>
           </>
         ) : isDone ? (
-          <span className="text-[#3F7A7E]">完成</span>
+          <span className="text-[#3F7A7E] animate-[upload-check-pop_700ms_ease-out_both] motion-reduce:animate-none">✓ 完成</span>
         ) : file.status === 'uploading' ? (
           <span className="text-[#3F7A7E]">{Math.round(file.progress)}%</span>
         ) : (
@@ -429,6 +494,51 @@ function FileRow({ file, index, onRemove }: { file: UploadFile; index: number; o
       </div>
 
       <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="absolute bottom-0 left-[-2px] h-px w-[582px] max-w-none" />
+    </div>
+  );
+}
+
+/* ─── Upload progress (takes the drop zone and file list's place while an upload is going) ──────── */
+
+function UploadingIcon() {
+  return (
+    <span className="relative flex h-[64px] w-[64px] items-center justify-center">
+      <span className="absolute inset-0 border-2 border-[#62A4A7] opacity-0 animate-[well-ripple_1.8s_cubic-bezier(0.22,1,0.36,1)_infinite] motion-reduce:hidden" />
+      <span className="absolute inset-[10px] bg-[#73BAC0]/20" />
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#3F7A7E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="relative overflow-visible">
+        <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" />
+        <g className="animate-[upload-arrow-rise_1.2s_ease-in-out_infinite] motion-reduce:animate-none">
+          <path d="M12 15V4" />
+          <path d="M7 9l5-5 5 5" />
+        </g>
+      </svg>
+    </span>
+  );
+}
+
+function UploadProgress({ progress, fileName, fileNumber, fileCount, merging }: { progress: number; fileName: string; fileNumber: number; fileCount: number; merging: boolean }) {
+  return (
+    <div className="flex h-full min-h-[260px] flex-col items-center justify-center gap-3 text-center">
+      <UploadingIcon />
+      <p className="text-[40px] font-bold leading-[48px] tabular-nums text-[#3F7A7E]">{Math.floor(progress)}%</p>
+      <div className="relative h-[6px] w-[420px] overflow-hidden bg-[#73BAC0]/20">
+        <div
+          className="absolute inset-y-0 left-0 transition-[width] duration-100 ease-linear animate-[upload-stripes_1s_linear_infinite] motion-reduce:animate-none"
+          style={{ width: `${progress}%`, backgroundImage: SENDING_STRIPES }}
+        />
+      </div>
+      {fileNumber > 0 ? (
+        <>
+          <p className="max-w-[480px] truncate text-base leading-[23px] text-[#6F7468]">{`第 ${fileNumber}／${fileCount} 個　${fileName}`}</p>
+          {merging ? (
+            <p className="text-[13px] text-[#3F7A7E]">正在合併中…</p>
+          ) : (
+            <p className="text-[13px] text-[#6F7468]">上傳完成前無法加入新檔案</p>
+          )}
+        </>
+      ) : (
+        <p className="text-base leading-[23px] text-emerald-600">✓ 全部上傳完成</p>
+      )}
     </div>
   );
 }
@@ -446,20 +556,36 @@ export default function UploadPage() {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // the drop zone and file list folded away, the upload's progress in their place
+  const [folded, setFolded] = useState(false);
+  // the current file's chunks are all sent and the backend is merging them (progress sits at 100% meanwhile)
+  const [merging, setMerging] = useState(false);
+  // bytes per second over the wire, smoothed; 0 when not uploading
+  const [speed, setSpeed] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const yearRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const [currentYear, setCurrentYear] = useState(YEAR_GROUPS[0].year);
+  // null until the list is scrolled: then the first year listed
+  const [scrolledYear, setScrolledYear] = useState<string | null>(null);
   const [yearDirection, setYearDirection] = useState<'up' | 'down'>('down');
   // how many times the year has changed while scrolling (each change slides the new year in)
   const [yearSwitches, setYearSwitches] = useState(0);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  // Local edits to the placeholder records until they are saved to the backend
-  // shared with the map, check and compare pages, which can rename the files too
-  const recordNames = useRecordNames();
-  const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
+  const { records, loading, loadError, rename, remove, retry, add } = useTaskRecords();
+  // why the last rename, delete or retry failed
+  const [actionError, setActionError] = useState<string | null>(null);
+  const { session } = useSiteChrome();
+  const uploadAllowed = session !== null && canUpload(session.role);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const query = searchQuery.trim().toLowerCase();
+  const visibleGroups = groupByYear(
+    query
+      ? records.filter((r) => [displayName(r.name), r.statusLabel, r.timestamp].some((text) => text.toLowerCase().includes(query)))
+      : records,
+  );
+  const currentYear = scrolledYear ?? visibleGroups[0]?.year ?? '';
 
   // Scroll to a specific year section
   const scrollToYear = useCallback((targetYear: string) => {
@@ -481,32 +607,30 @@ export default function UploadPage() {
     const container = scrollRef.current;
     if (!container) return;
     const scrollTop = container.scrollTop;
-    let newYear = YEAR_GROUPS[0].year;
-    for (const group of YEAR_GROUPS) {
+    let newYear = visibleGroups[0]?.year ?? '';
+    for (const group of visibleGroups) {
       const el = yearRefs.current[group.year];
       if (el && el.offsetTop - 80 <= scrollTop) {
         newYear = group.year;
       }
     }
     if (newYear !== currentYear) {
-      const currentIdx = YEAR_GROUPS.findIndex((g) => g.year === currentYear);
-      const newIdx = YEAR_GROUPS.findIndex((g) => g.year === newYear);
+      const currentIdx = visibleGroups.findIndex((g) => g.year === currentYear);
+      const newIdx = visibleGroups.findIndex((g) => g.year === newYear);
       setYearDirection(newIdx > currentIdx ? 'down' : 'up');
       setYearSwitches((count) => count + 1);
-      setCurrentYear(newYear);
+      setScrolledYear(newYear);
     }
-  }, [currentYear]);
+  }, [currentYear, visibleGroups]);
 
   const addFiles = useCallback((fileList: FileList | File[]) => {
     const arr = Array.from(fileList);
     if (arr.length === 0) return;
-    const newFiles: UploadFile[] = arr.map((f) => ({
-      id: randomId(),
-      name: f.name,
-      size: f.size,
-      progress: 0,
-      status: 'pending' as const,
-    }));
+    // files the backend would refuse are marked at once (it answers other formats with a 500, Backend-SPEC §5)
+    const newFiles: UploadFile[] = arr.map((f) => {
+      const error = uploadError(f) ?? undefined;
+      return { id: randomId(), file: f, progress: 0, status: error ? 'error' : 'pending', error, rejected: error != null };
+    });
     setFiles((prev) => [...prev, ...newFiles]);
   }, []);
 
@@ -523,56 +647,92 @@ export default function UploadPage() {
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
-  }, [addFiles]);
+    if (uploadAllowed && e.dataTransfer.files.length > 0) addFiles(e.dataTransfer.files);
+  }, [addFiles, uploadAllowed]);
 
-  const startUpload = useCallback(() => {
+  const updateFile = (id: string, change: Partial<UploadFile>) =>
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...change } : f)));
+
+  // One file at a time, each sent in resumable chunks and becoming a map in the list once the backend has merged it.
+  // The drop zone and file list fold away first (FOLD_TIME) so the upload's progress can take their place.
+  const startUpload = async () => {
+    // new files plus ones that failed at runtime (a format rejection is left alone); each resumes from its uploadId
+    // when the backend already holds chunks, or starts over when it has none
+    const pending = files.filter(isUploadable);
+    if (pending.length === 0) return;
     setUploading(true);
-    setFiles((prev) => prev.map((f) => f.status === 'done' ? f : { ...f, status: 'uploading' as const }));
-    const interval = setInterval(() => {
-      setFiles((prev) => {
-        const updated = prev.map((f) => {
-          if (f.status === 'done') return f;
-          if (f.status === 'error') return f;
-          const next = Math.min(f.progress + Math.random() * 15 + 5, 100);
-          return next >= 100 ? { ...f, progress: 100, status: 'done' as const } : { ...f, progress: next };
-        });
-        if (updated.every((f) => f.status === 'done' || f.status === 'error')) {
-          clearInterval(interval);
-          setUploading(false);
-        }
-        return updated;
-      });
-    }, 500);
+    setFolded(true);
+    setSpeed(0);
+    // the files sent last time make way, so this upload's progress is its own
+    setFiles((prev) => prev.filter((f) => f.status !== 'done'));
+    await delay(FOLD_TIME);
+
+    // real upload speed, from the bytes actually going over the wire: completed files, plus the one in flight
+    let completedBytes = 0;
+    let sample = { time: performance.now(), bytes: 0 };
+    for (const item of pending) {
+      updateFile(item.id, { status: 'uploading', loaded: 0 });
+      try {
+        const task = await uploadInChunks(item.file, {
+          onUploadId: (uploadId) => updateFile(item.id, { uploadId }),
+          onMerging: () => setMerging(true),
+          onProgress: (sent) => {
+            updateFile(item.id, { loaded: sent, progress: (sent / item.file.size) * 100 });
+            const now = performance.now();
+            const total = completedBytes + sent;
+            if (now - sample.time >= 400) {
+              const instant = ((total - sample.bytes) / (now - sample.time)) * 1000;
+              setSpeed((prev) => (prev > 0 ? prev * 0.6 + instant * 0.4 : instant));
+              sample = { time: now, bytes: total };
+            }
+          },
+        }, item.uploadId);
+        updateFile(item.id, { status: 'done', progress: 100, loaded: item.file.size });
+        setMerging(false);
+        completedBytes += item.file.size;
+        add(task);
+      } catch (error) {
+        setMerging(false);
+        updateFile(item.id, { status: 'error', error: (error as Error).message });
+      }
+    }
+    setUploading(false);
+    setSpeed(0);
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => setFolded(false), DONE_PAUSE);
+  };
+
+  // while an upload is going, files dragged over the drop zone are refused (and not opened by the browser either)
+  const refuseDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'none';
   }, []);
+
+  // Runs a rename or delete, saying why when the backend refuses it
+  const runAction = async (action: () => Promise<void>) => {
+    setActionError(null);
+    try {
+      await action();
+    } catch (error) {
+      setActionError((error as Error).message);
+    }
+  };
 
   const removeFile = useCallback((id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   }, []);
 
-  const totalSize = files.reduce((s, f) => s + f.size, 0);
+  const totalSize = files.reduce((s, f) => s + f.file.size, 0);
+  const listMessage = loadError ?? (loading ? '載入中…' : records.length === 0 ? '尚無匯入紀錄' : visibleGroups.length === 0 ? '找不到符合的紀錄' : null);
 
-  const nameOf = (record: RecordItem) => recordName(record, recordNames);
-
-  const visibleGroups = YEAR_GROUPS
-    .map((group) => ({
-      ...group,
-      records: group.records.filter((r) => !deletedIds.has(r.id)),
-    }))
-    .map((group) => ({
-      ...group,
-      records: searchQuery.trim()
-        ? group.records.filter((r) => {
-            const q = searchQuery.toLowerCase();
-            return (
-              nameOf(r).toLowerCase().includes(q) ||
-              r.statusLabel.toLowerCase().includes(q) ||
-              r.timestamp.toLowerCase().includes(q)
-            );
-          })
-        : group.records,
-    }))
-    .filter((group) => group.records.length > 0);
+  // the files going up in this upload, for the folded progress view and footer
+  const sending = files.filter((f) => f.status === 'uploading' || f.status === 'done');
+  const sendingSize = sending.reduce((s, f) => s + f.file.size, 0);
+  const sentSize = sending.reduce((s, f) => s + (f.status === 'done' ? f.file.size : f.loaded ?? 0), 0);
+  const overallProgress = sendingSize > 0 ? (sentSize / sendingSize) * 100 : 0;
+  const currentNumber = sending.findIndex((f) => f.status !== 'done') + 1;
+  const currentName = sending.find((f) => f.status !== 'done')?.file.name ?? '';
+  const etaSeconds = speed > 0 ? Math.ceil((sendingSize - sentSize) / speed) : 0;
 
   return (
     <div className="relative min-h-screen overflow-hidden" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
@@ -609,57 +769,89 @@ export default function UploadPage() {
               </div>
               <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="mt-0 h-px w-[582px] max-w-none" />
 
-              {/* Drop Zone */}
+              {/* Drop Zone (folds up first when an upload starts; opens again once the progress has gone) */}
               <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => inputRef.current?.click()}
-                className={`relative mt-4 h-[183.5px] w-[583.5px] max-w-none cursor-pointer transition-opacity duration-300 ${
-                  isDragging ? 'opacity-80' : ''
+                className={`grid transition-[grid-template-rows,opacity] duration-500 ease-in-out ${
+                  folded ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] delay-500'
                 }`}
               >
-                <input
-                  ref={inputRef}
-                  type="file"
-                  multiple
-                  accept=".tif,.tiff,.geotiff"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files) addFiles(e.target.files);
-                    e.target.value = '';
-                  }}
-                />
-                <Image src="/upload/drop-frame.svg" alt="" width={584} height={184} className="pointer-events-none absolute inset-0 max-w-none" />
-                <div className="flex flex-col items-center pt-[53px] text-center text-2xl leading-[34px]">
-                  <p className="text-[#2C322F]">
-                    拖曳檔案至此，或 <span className="text-[#3F7A7E]">選擇檔案</span>
-                  </p>
-                  <p className="text-[#6F7468]">支援 .tif／.tiff，單檔上限 2GB</p>
+                <div className={`min-h-0 ${folded ? 'overflow-hidden' : ''}`}>
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => uploadAllowed && inputRef.current?.click()}
+                    className={`relative mt-4 h-[183.5px] w-[583.5px] max-w-none transition-opacity duration-300 ${
+                      uploadAllowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
+                    } ${isDragging ? 'opacity-80 animate-[upload-drop-breathe_1.2s_ease-in-out_infinite] motion-reduce:animate-none' : ''}`}
+                  >
+                    <input
+                      ref={inputRef}
+                      type="file"
+                      multiple
+                      accept=".tif,.tiff"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files) addFiles(e.target.files);
+                        e.target.value = '';
+                      }}
+                    />
+                    <Image src="/upload/drop-frame.svg" alt="" width={584} height={184} className="pointer-events-none absolute inset-0 max-w-none" />
+                    {isDragging && (
+                      <span className="pointer-events-none absolute left-1/2 top-[18px] -translate-x-1/2">
+                        <svg aria-hidden width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3F7A7E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-[upload-arrow-rise_1.2s_ease-in-out_infinite] motion-reduce:animate-none">
+                          <path d="M12 19V5M5 12l7-7 7 7" />
+                        </svg>
+                      </span>
+                    )}
+                    <div className="flex flex-col items-center pt-[53px] text-center text-2xl leading-[34px]">
+                      {uploadAllowed ? (
+                        <p className="text-[#2C322F]">
+                          拖曳檔案至此，或 <span className="text-[#3F7A7E]">選擇檔案</span>
+                        </p>
+                      ) : (
+                        <p className="text-[#2C322F]">檢視者帳號無法上傳影像</p>
+                      )}
+                      <p className="text-[#6F7468]">支援 .tif／.tiff</p>
+                    </div>
+                  </div>
+                  <div className="h-[44px]" />
                 </div>
               </div>
 
-              {/* File List */}
-              <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="mt-[44px] h-px w-[582px] max-w-none" />
-              <div className="flex-1 overflow-y-auto">
-                {files.length === 0 ? (
-                  <div className="py-8 text-center text-base text-[#6F7468]">尚無檔案</div>
-                ) : (
-                  files.map((file, idx) => <FileRow key={file.id} file={file} index={idx} onRemove={removeFile} />)
-                )}
+              {/* File List (folds up with the drop zone; the upload's progress fades in in its place) */}
+              <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="h-px w-[582px] max-w-none" />
+              <div className="relative min-h-0 flex-1" onDragOver={folded ? refuseDrop : undefined} onDrop={folded ? refuseDrop : undefined}>
+                <div className={`h-full origin-top overflow-y-auto transition-[transform,opacity] duration-500 ease-in-out ${folded ? 'scale-y-0 opacity-0' : 'delay-500'}`}>
+                  {files.length === 0 ? (
+                    <div className="py-8 text-center text-base text-[#6F7468]">尚無檔案</div>
+                  ) : (
+                    files.map((file, idx) => <FileRow key={file.id} file={file} index={idx} onRemove={removeFile} />)
+                  )}
+                </div>
+                <div className={`absolute inset-0 transition-opacity duration-500 ${folded ? 'opacity-100 delay-500' : 'pointer-events-none opacity-0'}`}>
+                  <UploadProgress progress={overallProgress} fileName={currentName} fileNumber={currentNumber} fileCount={sending.length} merging={merging} />
+                </div>
               </div>
 
               {/* Footer Bar */}
               <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="h-px w-[582px] max-w-none" />
               <div className="flex h-[89px] items-start justify-between pt-3.5">
-                <div className="flex items-baseline gap-1 pt-1.5 text-[#2C322F]">
-                  <span className="text-2xl leading-8">{files.length}</span>
-                  <span className="text-[13px] text-[#6F7468]">個檔案 · {formatSize(totalSize)}</span>
-                </div>
+                {uploading ? (
+                  <div className="pt-1.5 text-[13px] leading-8 tabular-nums text-[#6F7468]">
+                    <span className="text-[#2C322F]">{formatSize(sentSize)} / {formatSize(sendingSize)}</span>
+                    {speed > 0 && <>{' '}· {formatSize(speed)}/s · 剩約 {formatSeconds(etaSeconds)}</>}
+                  </div>
+                ) : (
+                  <div className="flex items-baseline gap-1 pt-1.5 text-[#2C322F]">
+                    <span className="text-2xl leading-8">{files.length}</span>
+                    <span className="text-[13px] text-[#6F7468]">個檔案 · {formatSize(totalSize)}</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={startUpload}
-                  disabled={uploading || files.length === 0}
+                  disabled={!uploadAllowed || uploading || !files.some(isUploadable)}
                   className="h-[42px] w-[134px] rounded-sm bg-[#62A4A7] text-[14.5px] text-white transition-all hover:bg-[#54999D] disabled:opacity-50"
                 >
                   {uploading ? '上傳中...' : '開始上傳 →'}
@@ -678,13 +870,15 @@ export default function UploadPage() {
             <div className="flex items-start justify-between pl-[46px] pr-[57px] pt-10">
               <div className="flex items-center gap-4">
                 {/* the list's year: picks a year to jump to */}
-                <YearPicker
-                  year={currentYear}
-                  years={visibleGroups.map((group) => group.year)}
-                  direction={yearDirection}
-                  switchCount={yearSwitches}
-                  onPick={scrollToYear}
-                />
+                {currentYear && (
+                  <YearPicker
+                    year={currentYear}
+                    years={visibleGroups.map((group) => group.year)}
+                    direction={yearDirection}
+                    switchCount={yearSwitches}
+                    onPick={scrollToYear}
+                  />
+                )}
               </div>
               <div className="flex items-center gap-[18px]">
                 <IconButton>
@@ -742,6 +936,12 @@ export default function UploadPage() {
               className="scroll-indicator relative mb-16 ml-[37px] mr-2.5 mt-[23px] min-h-0 flex-1 overflow-y-auto"
               onScroll={handleScroll}
             >
+              {actionError && (
+                <p role="alert" className="mb-3 bg-[#F7E5DF] px-4 py-2 text-base font-bold text-[#98412F]">
+                  {actionError}
+                </p>
+              )}
+              {listMessage && <p className="py-8 text-center text-base text-[#6F7468]">{listMessage}</p>}
               {visibleGroups.map((group, index) => (
                 <div
                   key={group.year}
@@ -759,9 +959,13 @@ export default function UploadPage() {
                       <RecordEntry
                         key={record.id}
                         record={record}
-                        name={nameOf(record)}
-                        onRename={(name) => renameRecord(record.id, name)}
-                        onDelete={() => setDeletedIds((current) => new Set(current).add(record.id))}
+                        name={displayName(record.name)}
+                        renamable={session !== null && canRename(session.role)}
+                        deletable={session !== null && canDelete(session, record)}
+                        retriable={record.retryable && session !== null && canRetry(session.role)}
+                        onRename={(name) => runAction(() => rename(record.id, name))}
+                        onDelete={() => runAction(() => remove(record.id))}
+                        onRetry={() => runAction(() => retry(record.id))}
                       />
                     ))}
                   </div>

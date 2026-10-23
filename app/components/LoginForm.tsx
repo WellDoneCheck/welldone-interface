@@ -10,6 +10,8 @@ interface LoginFormProps {
   onAccountChange: (value: string) => void;
   onPasswordChange: (value: string) => void;
   onSubmit: (event: FormEvent) => void;
+  // waiting for the backend: the button is disabled so the form is not sent twice
+  submitting: boolean;
 }
 
 export default function LoginForm({
@@ -20,6 +22,7 @@ export default function LoginForm({
   onAccountChange,
   onPasswordChange,
   onSubmit,
+  submitting,
 }: LoginFormProps) {
   return (
     // pb-[30px]: Figma sits the form 15px above the panel's vertical center
@@ -59,9 +62,10 @@ export default function LoginForm({
 
         <button
           type="submit"
-          className="mt-[37px] h-[94px] w-full bg-[#62A4A7] fs-32 text-[#2C322F] transition-all duration-300 hover:shadow-[var(--shadow-brand-glow)] active:scale-[0.98]"
+          disabled={submitting}
+          className="mt-[37px] h-[94px] w-full bg-[#62A4A7] fs-32 text-[#2C322F] transition-all duration-300 hover:shadow-[var(--shadow-brand-glow)] active:scale-[0.98] disabled:cursor-wait disabled:opacity-60"
         >
-          登入
+          {submitting ? '登入中…' : '登入'}
         </button>
       </form>
     </div>

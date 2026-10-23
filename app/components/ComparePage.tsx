@@ -10,11 +10,14 @@ import BackToMapLink, { BACK_LINK_HEIGHT } from './BackToMapLink';
 import CursorCoordinates from './CursorCoordinates';
 import SharedTransition, { SHARED, pagePart } from './SharedTransition';
 import { CONTENT_TOP, PAGE_GAP, PAGE_GUTTER, useViewportSize, type ViewportSize } from './pageFrame';
-import { EXPORT_WELLS } from '../data/exportWells';
-import type { RecordItem } from '../data/mapRecords';
-import { decodeCsv, downloadCsv } from '../utils/csv';
-import { parseLegalWellsCsv } from '../utils/legalWellsCsv';
-import { buildComparisonCsv, compareWells, type GeoPoint, type WellComparison } from '../utils/wellComparison';
+import { useWellVerdicts } from './useWellVerdicts';
+import type { NamedTask } from '../utils/tasks';
+import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
+import { downloadCsv } from '../utils/csv';
+import { buildComparisonCsv, type GeoPoint, type WellComparison } from '../utils/wellComparison';
+import { importRegistry, loadRegistry, matchRegistry, setToRegister, type RegistryResult } from '../utils/wellRegistry';
+import { verdictOf } from '../utils/wellVerdicts';
+import type { MapWell } from '../utils/wells';
 
 // Sized like the 1920×1080 Figma frame and scaled to fit the window; the stage then covers the whole window and
 // its edges line up with the navbar (see pageFrame)
@@ -33,9 +36,6 @@ const CARD_MAX_HEIGHT = 440;
 const TOLERANCE = { min: 5, max: 100, step: 5, initial: 15 };
 const SAMPLE_CSV = '/compare/legal-wells-sample.csv';
 const RESULT_FILE_NAME = 'skywell-legal-well-comparison.csv';
-
-// Wells judged not to be wells are left out: only real detections are compared with the register
-const DETECTED_WELLS: GeoPoint[] = EXPORT_WELLS.filter((well) => well.verdict !== 'not-well');
 
 type Category = 'matched' | 'unregistered' | 'missing';
 
@@ -142,7 +142,7 @@ async function markerIcons(): Promise<Record<string, Icon>> {
 
 // The markers as the map's icon layer: the compared wells (those of the chosen category in full, the rest faded, the
 // unregistered with their halo while they are the ones shown), or before a register is uploaded what the AI detected
-function useMarkerLayer(map: MapLibreMap | null, items: CompareItem[] | null, filter: Category, selectedKey: string | null, scale: number) {
+function useMarkerLayer(map: MapLibreMap | null, detected: GeoPoint[], items: CompareItem[] | null, filter: Category, selectedKey: string | null, scale: number) {
   const ready = useIconLayer(map, MARKER_LAYER, markerIcons, { 'icon-image': markerIcon('detected'), 'symbol-sort-key': ['get', 'order'] });
 
   useEffect(() => {
@@ -153,9 +153,9 @@ function useMarkerLayer(map: MapLibreMap | null, items: CompareItem[] | null, fi
           items.map((item) => ({ ...item.point, item })),
           ({ item }, order) => ({ key: item.key, category: item.category, order }),
         )
-      : pointFeatures(DETECTED_WELLS, (_, order) => ({ category: 'detected', order }));
+      : pointFeatures(detected, (_, order) => ({ category: 'detected', order }));
     (map.getSource(MARKER_LAYER) as GeoJSONSource).setData(features);
-  }, [ready, map, items]);
+  }, [ready, map, detected, items]);
 
   useEffect(() => {
     if (!ready || !map) return;
@@ -255,12 +255,17 @@ function stageLayout(scale: number, viewport: ViewportSize) {
   };
 }
 
-// The smallest area holding all the points, for fitting the map to them
-function pointsBounds(points: GeoPoint[]): GeoBounds {
+// The smallest area holding all the points, for fitting the map to them (or else, without any, the fallback)
+function pointsBounds(points: GeoPoint[], fallback: GeoBounds): GeoBounds {
+  if (points.length === 0) return fallback;
   const latitudes = points.map((point) => point.latitude);
   const longitudes = points.map((point) => point.longitude);
   return [Math.min(...longitudes), Math.min(...latitudes), Math.max(...longitudes), Math.max(...latitudes)];
 }
+
+// The register's wells in a comparison: those matched and those missing from the recognised ones
+const legalPoints = (comparison: WellComparison | null): GeoPoint[] =>
+  comparison ? [...comparison.matched.map((m) => m.legal), ...comparison.missing.map((m) => m.legal)] : [];
 
 /* ─── Map layer ─────────────────────────────────────────────────── */
 
@@ -442,12 +447,6 @@ function Legend({ compared, position }: { compared: boolean; position: { right: 
 
 /* ─── Panel ─────────────────────────────────────────────────────── */
 
-interface LegalRegister {
-  fileName: string;
-  wells: GeoPoint[];
-  skippedRows: number;
-}
-
 function CsvBadge({ size }: { size: number }) {
   return (
     <span className="flex shrink-0 items-center justify-center bg-[#62A4A7] font-black text-white" style={{ width: size, height: size, fontSize: size * 0.3 }}>
@@ -525,15 +524,16 @@ function HowItWorks() {
   );
 }
 
-function RegisterFile({ register, onFile, error }: { register: LegalRegister; onFile: (file: File) => void; error: string | null }) {
+function RegisterFile({ register, onFile, error }: { register: RegistryResult; onFile: (file: File) => void; error: string | null }) {
+  const { file_name, imported, skipped } = register.source;
   return (
     <div className="flex flex-col gap-[8px]">
       <div className="flex items-center gap-[12px] border-[1.5px] border-[#D1E6E7] bg-white px-[14px] py-[10px]">
         <CsvBadge size={40} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[18px] font-bold leading-tight text-[#2C322F]">{register.fileName}</span>
+          <span className="truncate text-[18px] font-bold leading-tight text-[#2C322F]">{file_name}</span>
           <span className="text-[14px] font-medium text-[#6F7468]">
-            {register.wells.length.toLocaleString()} 筆合法井{register.skippedRows > 0 && `・略過 ${register.skippedRows} 筆無效座標`}
+            {imported.toLocaleString()} 筆合法井{skipped > 0 && `・略過 ${skipped} 筆無效資料`}
           </span>
         </div>
         <FileInput onFile={onFile} className="shrink-0 text-[16px] font-bold text-[#3F7A7E] hover:underline">
@@ -545,7 +545,8 @@ function RegisterFile({ register, onFile, error }: { register: LegalRegister; on
   );
 }
 
-function ToleranceSlider({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+// onCommit: the value let go of (the pointer or key released), to compare with
+function ToleranceSlider({ value, onChange, onCommit }: { value: number; onChange: (value: number) => void; onCommit: (value: number) => void }) {
   return (
     <label className="flex h-[58px] items-center gap-[18px] border border-[#E5E2D9] bg-white px-[18px]" title="辨識座標與合法井相距在此之內，視為同一口井">
       <span className="shrink-0 text-[20px] font-bold text-[#6F7468]">容許誤差</span>
@@ -556,6 +557,8 @@ function ToleranceSlider({ value, onChange }: { value: number; onChange: (value:
         step={TOLERANCE.step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
+        onPointerUp={(event) => onCommit(Number(event.currentTarget.value))}
+        onKeyUp={(event) => onCommit(Number(event.currentTarget.value))}
         className="h-[6px] min-w-0 flex-1 accent-[#62A4A7]"
       />
       <span className="w-[80px] shrink-0 text-right text-[24px] font-bold text-[#2C322F]">{value} m</span>
@@ -650,25 +653,74 @@ function ResultList({ items, filter, toRegisterIds, selectedKey, onSelect, onExp
 
 /* ─── Page ──────────────────────────────────────────────────────── */
 
-// mapRecord: the map compared, when opened from one on the map page
-export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
+interface ComparePageProps {
+  // the map compared, the wells recognised in it and its imagery
+  mapRecord: NamedTask;
+  wells: MapWell[];
+  imagery: Imagery | null;
+}
+
+export default function ComparePage({ mapRecord, wells, imagery }: ComparePageProps) {
   const scale = useFitScale(STAGE);
   const layout = stageLayout(scale, useViewportSize());
-  const [register, setRegister] = useState<LegalRegister | null>(null);
+  // the register and its comparison, as the backend worked it out; null until one is imported
+  const [register, setRegister] = useState<RegistryResult | null>(null);
+  const [busy, setBusy] = useState<string | null>('讀取清冊中…');
   const [error, setError] = useState<string | null>(null);
   const [tolerance, setTolerance] = useState(TOLERANCE.initial);
   const [filter, setFilter] = useState<Category>('unregistered');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  // Suspected unregistered wells picked out for registration follow-up (by detection id)
-  const [toRegisterIds, setToRegisterIds] = useState<Set<string>>(() => new Set());
+  const verdicts = useWellVerdicts();
+  // before a register is compared, the wells the AI detected (those judged not to be wells are left out, as the
+  // backend leaves them out of the comparison)
+  const detected = useMemo(() => wells.filter((well) => verdictOf(well, verdicts) !== 'not-well'), [wells, verdicts]);
 
-  const comparison = useMemo(() => (register ? compareWells(DETECTED_WELLS, register.wells, tolerance) : null), [register, tolerance]);
+  const comparison = register?.comparison ?? null;
+  // Suspected unregistered wells picked out for registration follow-up (by well code)
+  const toRegisterIds = register?.toRegister ?? new Set<string>();
   const items = useMemo(() => (comparison ? toItems(comparison) : []), [comparison]);
+
+  // Runs a backend step, showing what it is doing and why it failed
+  const run = async (doing: string, step: () => Promise<RegistryResult | null>) => {
+    setBusy(doing);
+    setError(null);
+    try {
+      const result = await step();
+      setRegister(result);
+      if (result) setTolerance(result.tolerance);
+    } catch (failure) {
+      setError((failure as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // the register left on this map, if any
+  const taskId = mapRecord.id;
+  useEffect(() => {
+    let current = true;
+    loadRegistry(taskId, TOLERANCE.initial).then(
+      (result) => {
+        if (!current) return;
+        setRegister(result);
+        if (result) setTolerance(result.tolerance);
+        setBusy(null);
+      },
+      (failure: Error) => {
+        if (!current) return;
+        setError(failure.message);
+        setBusy(null);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [taskId]);
   const { left: mapLeft, top: mapTop, width: mapWidth, height: mapHeight } = layout.map;
   // the map starts fitted to the wells in the area right of the panel (the padding is in screen pixels)
   const fit = useMemo(
     () => ({
-      bounds: pointsBounds([...DETECTED_WELLS, ...(register?.wells ?? [])]),
+      bounds: pointsBounds([...detected, ...legalPoints(comparison)], imagery?.bounds ?? TAIWAN_BOUNDS),
       padding: {
         left: mapLeft * scale,
         top: mapTop * scale,
@@ -676,16 +728,17 @@ export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
         bottom: (layout.height - mapTop - mapHeight) * scale,
       },
     }),
-    [register, mapLeft, mapTop, mapWidth, mapHeight, layout.width, layout.height, scale],
+    [detected, comparison, imagery, mapLeft, mapTop, mapWidth, mapHeight, layout.width, layout.height, scale],
   );
   // the survey map shared with the map page (SurveyMap), fitted here to the wells beside the panel; clicking it picks the
   // marker there, or closes the well's card
   const map = useSurveyMap({
+    imagery,
     fit,
     onMapClick: (event) => setSelectedKey((map && iconAt(map, MARKER_LAYER, event.point, 'key')) || null),
   });
   const selected = items.find((item) => item.key === selectedKey) ?? null;
-  useMarkerLayer(map, comparison ? items : null, filter, selectedKey, scale);
+  useMarkerLayer(map, detected, comparison ? items : null, filter, selectedKey, scale);
 
   // any move of the map closes the well's card (it would otherwise ride along over the panel). Every move here is the
   // user's (dragging, scrolling, pinching: a scroll zoom's movestart carries no originalEvent to tell) or the map
@@ -700,24 +753,30 @@ export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
   }, [map]);
   const counts = { matched: comparison?.matched.length ?? 0, unregistered: comparison?.unregistered.length ?? 0, missing: comparison?.missing.length ?? 0 };
 
-  const loadFile = async (file: File) => {
-    const result = parseLegalWellsCsv(decodeCsv(await file.arrayBuffer()));
-    if (!result.ok) {
-      setError(`「${file.name}」無法讀取：${result.error}`);
-      return;
-    }
-    setError(null);
-    setRegister({ fileName: file.name, wells: result.wells, skippedRows: result.skippedRows });
+  const loadFile = (file: File) => {
     setFilter('unregistered');
     setSelectedKey(null);
+    run('上傳並比對中…', () => importRegistry(taskId, file, tolerance));
   };
 
-  const toggleToRegister = (id: string) =>
-    setToRegisterIds((current) => {
-      const next = new Set(current);
-      if (!next.delete(id)) next.add(id);
-      return next;
-    });
+  const compareWith = (next: number) => {
+    if (register && next !== register.tolerance) run('比對中…', () => matchRegistry(taskId, register.source, next));
+  };
+
+  const toggleToRegister = async (code: string) => {
+    if (!register) return;
+    const listed = !register.toRegister.has(code);
+    setError(null);
+    try {
+      await setToRegister(register.wellIds[code], listed);
+      const next = new Set(register.toRegister);
+      if (listed) next.add(code);
+      else next.delete(code);
+      setRegister({ ...register, toRegister: next });
+    } catch (failure) {
+      setError((failure as Error).message);
+    }
+  };
 
   const changeFilter = (category: Category) => {
     setFilter(category);
@@ -747,7 +806,7 @@ export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
             <Legend compared={comparison !== null} position={{ right: layout.gutter, bottom: layout.bottomGap }} />
           </div>
           <div className="pointer-events-auto absolute" style={{ ...pagePart('compare-export'), left: layout.gutter, bottom: layout.bottomGap }}>
-            <ExportEntry />
+            <ExportEntry recordId={mapRecord.id} />
           </div>
 
           {/* grown out of the map page's comparison shortcut */}
@@ -770,8 +829,8 @@ export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
 
               {register && comparison ? (
                 <>
-                  <RegisterFile register={register} onFile={loadFile} error={error} />
-                  <ToleranceSlider value={tolerance} onChange={setTolerance} />
+                  <RegisterFile register={register} onFile={loadFile} error={busy ?? error} />
+                  <ToleranceSlider value={tolerance} onChange={setTolerance} onCommit={compareWith} />
                   <StatCards counts={counts} filter={filter} onFilter={changeFilter} />
                   <ResultList
                     items={items}
@@ -784,7 +843,7 @@ export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
                 </>
               ) : (
                 <>
-                  <DropZone onFile={loadFile} error={error} />
+                  <DropZone onFile={loadFile} error={busy ?? error} />
                   <HowItWorks />
                 </>
               )}
@@ -793,7 +852,7 @@ export default function ComparePage({ mapRecord }: { mapRecord?: RecordItem }) {
         </div>
       </div>
 
-      <BackToMapLink href="/map" mapFile={mapRecord}>
+      <BackToMapLink href={`/map?record=${encodeURIComponent(mapRecord.id)}`} mapFile={mapRecord}>
         <CursorCoordinates map={map} />
       </BackToMapLink>
     </div>

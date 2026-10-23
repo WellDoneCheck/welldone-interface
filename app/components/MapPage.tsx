@@ -1,14 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
 import ModelRender from './ModelRender';
 import ExportEntry from './ExportEntry';
 import CompareEntry from './CompareEntry';
 import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent, MapMouseEvent } from 'maplibre-gl';
-import { drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapLayer, useMapProject, type Icon, type Project } from './TileMap';
+import { drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapLayer, useMapProject, type Bounds, type Icon, type Project } from './TileMap';
 import { useSurveyMap } from './SurveyMap';
+import { TILE_COLOR, useTileProgressLayer } from './useTileProgressLayer';
+import { useRecognisedWells } from './useRecognisedWells';
+import { useCheckLink, usePrefetchCheckView } from './useCheckView';
+import { ButtonIcon, EXPAND_PATH, ExpandedView, ImageButton, MarkerIcon, WellMarkerPin } from './CompareImage';
+import { useCutImagery } from './useCutImagery';
+import type { TileState } from '../utils/tileProgress';
 import { pinScaleExpression, pinZoomScale } from '../utils/pinZoomScale';
 import { lastMapZoom, mapCameraFor, mapImageFor, projectWithCamera, rememberMapCamera, rememberMapImage, type MapCamera } from '../utils/mapCamera';
 import SharedTransition, {
@@ -20,10 +27,13 @@ import SharedTransition, {
 } from './SharedTransition';
 import BackToMapLink from './BackToMapLink';
 import CursorCoordinates from './CursorCoordinates';
-import type { MapWell, RecordItem } from '../data/mapRecords';
 import { mapHref } from '../utils/routeRecords';
 import { useWellVerdicts } from './useWellVerdicts';
-import { lookOf, VERDICT_COLOR, verdictOfWell, type VerdictLook } from '../utils/wellVerdicts';
+import { lookOf, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
+import { fileUrl } from '../utils/api';
+import type { NamedTask } from '../utils/tasks';
+import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
+import { wellImageUrl, type MapWell } from '../utils/wells';
 import { rememberVisit } from '../utils/lastVisit';
 import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, useViewportSize } from './pageFrame';
@@ -35,6 +45,8 @@ const OVERLAY_STAGE: FitStage = { width: 1920, height: CARD_HEIGHT, marginX: 0, 
 // The view tabs stick out this far past the card's right edge; the tabs' outer edge lines up with the navbar
 const TAB_OVERHANG = 55;
 const CARD_ID = 'well-card';
+// The aerial photo's side, in the card's pixels
+const PHOTO_SIZE = 640;
 
 // A pin (a square image whose tip is 85% of the way down) is this big at the page's scale, like in the Figma frame
 const PIN_SIZE = 90;
@@ -143,7 +155,7 @@ async function shadowedPins(): Promise<Record<string, Icon>> {
 }
 
 const wellFeatures = (wells: MapWell[], verdicts: ReturnType<typeof useWellVerdicts>) =>
-  pointFeatures(wells, (well) => ({ id: well.id, look: lookOf(verdictOfWell(well.id, verdicts)) }));
+  pointFeatures(wells, (well) => ({ id: well.id, look: lookOf(verdictOf(well, verdicts)) }));
 
 // The map's layer of pins: every well but the selected one (a page element), at the page's scale and smaller the
 // further out (pinScaleExpression). onHover: the well under the pointer, or null.
@@ -189,8 +201,11 @@ function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: 
 }
 
 interface MapCanvasProps {
-  // the wells of the imported map shown, one pin each
+  // the wells of the imported map shown, one pin each, over its imagery (null: not cut yet)
   wells: MapWell[];
+  imagery: Imagery | null;
+  // the whole image, shown while its imagery cannot be yet (null: not known either)
+  area: Bounds | null;
   // null while no well is selected
   selected: MapWell | null;
   cardOpen: boolean;
@@ -211,7 +226,7 @@ interface MapCanvasProps {
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -222,7 +237,9 @@ function MapCanvas({ wells, selected, cardOpen, startsWithCard, startCamera, sta
   const selectedId = selected?.id;
 
   const map = useSurveyMap({
-    fit: stripFit(viewport, startsWithCard),
+    imagery,
+    // the whole imagery; while there is none yet the area it is being cut from, or Taiwan
+    fit: stripFit(imagery?.bounds ?? area ?? TAIWAN_BOUNDS, viewport, startsWithCard),
     camera,
     // a picture of where the map is left with a well, for coming back to it from its check page
     onRestImage: selectedId ? (image) => rememberMapImage(selectedId, image) : undefined,
@@ -352,7 +369,7 @@ interface WellMarkerProps {
 // by its verification as the map's pins are: the pin image itself while not verified, its shape filled otherwise.
 function WellMarker({ record, corner, size, cardOpen, onClick }: WellMarkerProps) {
   const active = cardOpen;
-  const look = lookOf(verdictOfWell(record.id, useWellVerdicts()));
+  const look = lookOf(verdictOf(record, useWellVerdicts()));
   const pinClass = `relative h-auto w-full max-w-none drop-shadow-[0_6px_6px_rgba(0,0,0,0.35)] transition-transform duration-300 ${MOTION} group-hover:-translate-y-1.5 ${
     active ? '-translate-y-1.5 scale-110' : ''
   }`;
@@ -411,6 +428,23 @@ const LEGEND: { look: VerdictLook; label: string }[] = [
   { look: 'not-well', label: '已驗證：不是井' },
 ];
 
+// The tiles not cut yet while the map is cut, then those the AI has still to recognise
+const TILE_LEGEND: { state: TileState; label: string }[] = [
+  { state: 'uncut', label: '尚未切圖' },
+  { state: 'processing', label: '辨識中' },
+  { state: 'failed', label: '失敗' },
+  { state: 'pending', label: '等待辨識' },
+];
+
+function TileSwatch({ state }: { state: TileState }) {
+  return (
+    <span
+      className={`h-[26px] w-[26px] shrink-0 border-2 ${state === 'processing' ? 'animate-pulse motion-reduce:animate-none' : ''}`}
+      style={{ borderColor: TILE_COLOR[state], backgroundColor: `${TILE_COLOR[state]}${state === 'pending' || state === 'uncut' ? '2E' : '73'}` }}
+    />
+  );
+}
+
 // The compare page's stage, whose scale its corners (the export shortcut, the legend) are drawn at: this page's corners
 // are the same size, so moving between the two pages they stay put
 const CORNER_STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY: 0, minViewportWidth: 0 };
@@ -418,7 +452,8 @@ const CORNER_STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY:
 // What the pins' colours mean, in the corner the card covers: shown while no card is, fading out as one opens and back
 // in as it closes. Where and as large as the compare page's legend: against the navbar's right edge, just above the
 // window's bottom.
-function MapLegend({ hidden }: { hidden: boolean }) {
+// tiles: how many of the map's tiles are drawn in each state (null while none are)
+function MapLegend({ hidden, tiles }: { hidden: boolean; tiles: Record<TileState, number> | null }) {
   const scale = useFitScale(CORNER_STAGE);
   return (
     <div
@@ -434,6 +469,18 @@ function MapLegend({ hidden }: { hidden: boolean }) {
             {entry.label}
           </span>
         ))}
+        {tiles && (
+          <>
+            <span className="mt-[8px] text-[18px] font-bold text-[#6F7468]">小圖進度</span>
+            {TILE_LEGEND.filter((entry) => tiles[entry.state] > 0).map((entry) => (
+              <span key={entry.state} className="flex items-center gap-[12px] text-[21px] font-bold text-[#2C322F]">
+                <TileSwatch state={entry.state} />
+                {entry.label}
+                <span className="ml-auto pl-[12px] tabular-nums text-[#6F7468]">{tiles[entry.state]}</span>
+              </span>
+            ))}
+          </>
+        )}
       </div>
     </div>
   );
@@ -551,24 +598,80 @@ function ViewTab({ mode, label, top, color, active, onSelect }: ViewTabProps) {
   );
 }
 
-// Aerial: tile preview (will come from titiler).
+// Aerial: the well's photo, cut from its map by the backend.
 // Model: fake 3D render (click to generate), offset 4/6px inside the card as in Figma.
-function WellPhoto({ viewMode, wellId, shared, showing }: { viewMode: ViewMode; wellId: string; shared: boolean; showing: boolean }) {
-  if (viewMode === 'aerial') return <VerifyLink wellId={wellId} shared={shared} />;
+function WellPhoto({ viewMode, well, shared, showing }: { viewMode: ViewMode; well: MapWell; shared: boolean; showing: boolean }) {
+  if (viewMode === 'aerial') return <AerialPhoto well={well} shared={shared} />;
   return <ModelRender playing={showing} />;
 }
 
+// The photo as the expanded view shows it (as large as the check page's)
+const EXPANDED_PHOTO_SIZE = 702;
+
+// The aerial photo with its marker, buttons over its corner to grow it over the whole page (to zoom into) and to hide
+// the marker, and the way into the verification page (the photo itself)
+function AerialPhoto({ well, shared }: { well: MapWell; shared: boolean }) {
+  const [markerShown, setMarkerShown] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const photoRef = useRef<HTMLDivElement>(null);
+  const measureOrigin = useCallback(() => photoRef.current?.getBoundingClientRect() ?? null, []);
+  const toggleMarker = () => setMarkerShown((shown) => !shown);
+  const capture = { id: well.recordId, capturedAt: well.timestamp, image: wellImageUrl(well, EXPANDED_PHOTO_SIZE) };
+
+  return (
+    // hidden in place while the expanded view stands for it
+    <div ref={photoRef} className="relative h-full w-full" style={{ visibility: expanded ? 'hidden' : undefined }}>
+      <VerifyLink well={well} shared={shared} markerShown={markerShown} />
+      <div className="absolute right-4 top-4 flex flex-col gap-[8px]">
+        <ImageButton label="放大檢視" onClick={() => setExpanded(true)}>
+          <ButtonIcon path={EXPAND_PATH} />
+        </ImageButton>
+        <ImageButton label={markerShown ? '隱藏水井定位標' : '顯示水井定位標'} pressed={markerShown} onClick={toggleMarker}>
+          <MarkerIcon shown={markerShown} />
+        </ImageButton>
+      </div>
+      {/* on the page's body: out of the page's scaled stage and the card's flip, over everything */}
+      {expanded &&
+        createPortal(
+          <ExpandedView
+            captures={[capture]}
+            compareIndex={0}
+            position={50}
+            onPosition={() => {}}
+            markerShown={markerShown}
+            measureOrigin={measureOrigin}
+            onToggleMarker={toggleMarker}
+            onClose={() => setExpanded(false)}
+          />,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 // The aerial photo is the way into the verification page for this well
-function VerifyLink({ wellId, shared }: { wellId: string; shared: boolean }) {
+function VerifyLink({ well, shared, markerShown }: { well: MapWell; shared: boolean; markerShown: boolean }) {
+  const wellId = well.id;
+  const check = useCheckLink(wellId, TO_CHECK);
   return (
     <SharedTransition name={SHARED.wellPhoto} enabled={shared}>
       <Link
-        href={`/check?record=${wellId}`}
+        href={check.href}
         transitionTypes={TO_CHECK}
+        onNavigate={check.onNavigate}
         aria-label={`驗證 ${wellId}：比對多期影像`}
         className="group relative block h-[640px] w-[640px] outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
       >
-        <Image src="/aerial-tile.webp" unoptimized alt="空拍縮圖" width={640} height={640} />
+        {/* eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address */}
+        <img
+          src={fileUrl(wellImageUrl(well, PHOTO_SIZE))}
+          alt="空拍縮圖"
+          width={PHOTO_SIZE}
+          height={PHOTO_SIZE}
+          // no photo (the well is outside its map's imagery): the card's paper shows instead of a broken image
+          onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
+        />
+        {markerShown && <WellMarkerPin />}
         <span
           className={`absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-8 opacity-0 transition-opacity duration-300 ${MOTION} group-hover:opacity-100 group-focus-visible:opacity-100`}
         >
@@ -601,7 +704,7 @@ function CardFace({ record, shared, faceMode, viewMode, showing, onViewModeChang
       className={`absolute inset-0 bg-[#F7F6F1] p-4 shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)] [backface-visibility:hidden] ${className}`}
     >
       <div className="h-[640px] w-[640px]">
-        <WellPhoto viewMode={faceMode} wellId={record.id} shared={shared} showing={showing} />
+        <WellPhoto viewMode={faceMode} well={record} shared={shared} showing={showing} />
       </div>
 
       <SharedTransition name={SHARED.wellId} enabled={shared}>
@@ -661,8 +764,9 @@ function InfoCard({ record, open, viewMode, onViewModeChange }: InfoCardProps) {
 
 interface MapPageProps {
   // the imported map shown, the wells recognised in it (one pin each), and the one selected on arrival (null: none)
-  mapFile: RecordItem;
+  mapFile: NamedTask;
   wells: MapWell[];
+  imagery: Imagery | null;
   well: MapWell | null;
   // Arriving with a well asked for: its card slides in shortly after
   openCardOnArrival: boolean;
@@ -670,7 +774,7 @@ interface MapPageProps {
   cardOpenAtStart: boolean;
 }
 
-export default function MapPage({ mapFile, wells, well: initialWell, openCardOnArrival, cardOpenAtStart }: MapPageProps) {
+export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrivedImagery, well: initialWell, openCardOnArrival, cardOpenAtStart }: MapPageProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('aerial');
   const [cardOpen, setCardOpen] = useState(cardOpenAtStart);
   const [selectedId, setSelectedId] = useState(initialWell?.id ?? null);
@@ -682,7 +786,6 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
     setArrivedAt(arrival);
     setSelectedId(initialWell?.id ?? null);
   }
-  const record = wells.find((candidate) => candidate.id === selectedId) ?? null;
   // fixed as the page arrives: selecting a pin writes &well= into the address, which would otherwise read as
   // arriving with a card and fit the whole strip again, undoing the pin's zoom
   const [startsWithCard] = useState(openCardOnArrival || cardOpenAtStart);
@@ -697,6 +800,14 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
   const scale = useFitScale(OVERLAY_STAGE);
   const cornerScale = useFitScale(CORNER_STAGE);
   const [map, setMap] = useState<MapLibreMap | null>(null);
+  // how far this map has got, tile by tile, and its wells read again as the AI recognises more of them
+  const tiles = useTileProgressLayer(map, mapFile.id);
+  const wells = useRecognisedWells(mapFile, arrivedWells, tiles.recognised);
+  // the AI starts once the map is cut, so its count is known only then; until then the imagery cut so far
+  const imagery = useCutImagery(mapFile.id, arrivedImagery, tiles.recognised !== null) ?? tiles.imagery;
+  const record = wells.find((candidate) => candidate.id === selectedId) ?? null;
+  // the open card's way into its check page (the photo) finds that page ready, so the photo flies there
+  usePrefetchCheckView(cardOpen ? (record?.id ?? null) : null);
 
   // the navbar's 地圖檢視 comes back to the map shown last
   useEffect(() => rememberVisit('map', mapFile.id), [mapFile.id]);
@@ -736,6 +847,8 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
     <div className="pointer-events-none relative h-screen overflow-hidden" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
       <MapCanvas
         wells={wells}
+        imagery={imagery}
+        area={tiles.bounds}
         selected={record}
         cardOpen={cardOpen}
         startsWithCard={startsWithCard}
@@ -757,12 +870,12 @@ export default function MapPage({ mapFile, wells, well: initialWell, openCardOnA
       {/* in the bottom left corner, against the navbar's left edge, as on the compare page (and as large) */}
       <div className="pointer-events-auto absolute" style={{ ...pagePart('map-shortcuts'), left: PAGE_GUTTER, bottom: PAGE_GAP }}>
         <div className="flex gap-[12px]" style={{ zoom: cornerScale }}>
-          <ExportEntry />
+          <ExportEntry recordId={mapFile.id} wells={wells} />
           <CompareEntry recordId={mapFile.id} />
         </div>
       </div>
 
-      <MapLegend hidden={cardOpen} />
+      <MapLegend hidden={cardOpen} tiles={tiles.counts} />
 
       <div className="pointer-events-none absolute" style={{ ...pagePart('map-card'), top: CONTENT_TOP, right: PAGE_GUTTER + TAB_OVERHANG * scale }}>
         <div

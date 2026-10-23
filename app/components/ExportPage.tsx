@@ -2,15 +2,21 @@
 
 import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import { useWellVerdicts } from './useWellVerdicts';
-import { lookOf, setWellVerdict, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
+import { canVerify, lookOf, saveVerdict, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useFitScale, type FitStage } from './useFitScale';
 import { NAVBAR_HEIGHT } from './pageFrame';
 import SharedTransition, { ExportPageTransition, FROM_EXPORT, FROM_EXPORT_SHARE, SHARED } from './SharedTransition';
-import { EXPORT_WELLS, formatCoordinates, type ExportWell, type WellVerdict } from '../data/exportWells';
+import LoadNotice from './LoadNotice';
+import { useSiteChrome } from './SiteChrome';
+import { useMapView } from './useMapView';
+import { usePageSearchParams } from './usePageSearchParams';
+import { fileUrl } from '../utils/api';
+import { wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
 import { buildWellsCsv } from '../utils/wellsCsv';
 import { downloadCsv } from '../utils/csv';
+import { useCheckLink } from './useCheckView';
 
 // Laid out for the 1920px-wide Figma frame; height 0 lets only the viewport width decide the scale
 const EXPORT_STAGE: FitStage = { width: 1920, height: 0, marginX: 0, marginY: 0, minViewportWidth: 0 };
@@ -30,13 +36,16 @@ const HERO_PAPER_FROM = 0.85;
 type SectionKind = VerdictLook;
 const SECTION_ORDER: SectionKind[] = ['well', 'not-well', 'pending'];
 
-const SECTIONS: Record<SectionKind, { title: string; count: string; countColor: string }> = {
-  well: { title: '已驗證：是井', count: '是井 Well', countColor: 'text-[#62A4A7]' },
-  'not-well': { title: '已驗證：不是井', count: '不是井 Not a well', countColor: 'text-[#8A8F8C]' },
-  pending: { title: '未驗證的水井', count: '未驗證 Pending', countColor: 'text-[#BC5646]' },
+// empty: what the section says while it has no wells
+const SECTIONS: Record<SectionKind, { title: string; count: string; countColor: string; empty: string }> = {
+  well: { title: '已驗證：是井', count: '是井 Well', countColor: 'text-[#62A4A7]', empty: '還沒有驗證為「是井」的水井' },
+  'not-well': { title: '已驗證：不是井', count: '不是井 Not a well', countColor: 'text-[#8A8F8C]', empty: '還沒有驗證為「不是井」的水井' },
+  pending: { title: '未驗證的水井', count: '未驗證 Pending', countColor: 'text-[#BC5646]', empty: '所有水井都已驗證' },
 };
+// said once in place of the sections when the map has no wells at all
+const NO_WELLS = '這張地圖還沒有辨識到水井';
 
-const VERDICT_BUTTONS: { verdict: WellVerdict; label: string; className: string }[] = [
+const VERDICT_BUTTONS: { verdict: Verdict; label: string; className: string }[] = [
   { verdict: 'not-well', label: '不是井', className: 'border-[4px] border-[#8A8F8C] text-[#5E625F]' },
   { verdict: 'well', label: '是井', className: 'bg-[#62A4A7] text-[#FBFBF8]' },
 ];
@@ -139,17 +148,20 @@ function InfoLine({ icon, text }: { icon: string; text: string }) {
 }
 
 interface WellCardProps {
-  well: ExportWell;
+  well: MapWell;
   selected: boolean;
   // this card's photo, id, coordinates and time move to the check page (only the card being opened: a name is unique)
   shared: boolean;
   onToggle: () => void;
-  onVerdict: (verdict: WellVerdict) => void;
+  // null: the user may not verify (a viewer)
+  onVerdict: ((verdict: Verdict) => void) | null;
   onOpen: () => void;
 }
 
 function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellCardProps) {
   const badge = BADGES[lookOf(well.verdict)];
+  // read ahead as the pointer or focus comes to the photo, so the check page is ready when it is opened
+  const check = useCheckLink(well.id, FROM_EXPORT);
 
   return (
     // cards scrolled out of the row are not rendered until they come into view (50 cards with large shadows)
@@ -159,20 +171,23 @@ function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellC
             one whose parts move there */}
         <SharedTransition name={SHARED.wellPhoto} enabled={shared} share={FROM_EXPORT_SHARE}>
           <Link
-            href={`/check?record=${well.id}`}
+            href={check.href}
             transitionTypes={FROM_EXPORT}
             onClick={onOpen}
+            onNavigate={check.onNavigate}
+            onPointerEnter={check.readAhead}
+            onFocus={check.readAhead}
             aria-label={`檢查 ${well.id}：比對多期影像`}
             className="group/photo absolute inset-0 block overflow-hidden outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
           >
             {/* once opened, the photo drops its hover look at once, so it flies to the check page as the bare capture */}
-            <Image
-              src="/export/well-tile.webp"
-              unoptimized
+            {/* eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address */}
+            <img
+              src={fileUrl(wellImageUrl(well, CARD_WIDTH))}
               alt={`${well.id} 空拍影像`}
-              fill
-              sizes="320px"
-              className={`object-cover ${shared ? '' : 'transition-transform duration-500 ease-[var(--ease-expo)] group-hover/photo:scale-[1.04]'}`}
+              loading="lazy"
+              onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
+              className={`absolute inset-0 h-full w-full object-cover ${shared ? '' : 'transition-transform duration-500 ease-[var(--ease-expo)] group-hover/photo:scale-[1.04]'}`}
             />
             <span
               className={`absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-[14px] opacity-0 transition-opacity duration-300 group-hover/photo:opacity-100 group-focus-visible/photo:opacity-100 ${
@@ -204,13 +219,13 @@ function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellC
         </SharedTransition>
         <div className="mt-[6px] flex flex-col gap-[3px] pl-[2px]">
           <SharedTransition name={SHARED.wellCoordinates} enabled={shared} share={FROM_EXPORT_SHARE}>
-            <InfoLine icon="/export/icon-location.png" text={formatCoordinates(well)} />
+            <InfoLine icon="/export/icon-location.png" text={well.coordinates} />
           </SharedTransition>
           <SharedTransition name={SHARED.wellTime} enabled={shared} share={FROM_EXPORT_SHARE}>
-            <InfoLine icon="/export/icon-clock.png" text={well.capturedAt} />
+            <InfoLine icon="/export/icon-clock.png" text={well.timestamp} />
           </SharedTransition>
         </div>
-        {well.verdict === null && (
+        {well.verdict === null && onVerdict && (
           <div className="mt-[20px] flex gap-[16px]">
             {VERDICT_BUTTONS.map((button) => (
               <button
@@ -266,13 +281,27 @@ function useRenderedCount(total: number): number {
   return Math.min(count, total);
 }
 
+// In place of a section's row of cards while it has none (or of the sections, while the map has no wells): a dashed
+// slot lined up with the sections' titles
+function EmptyRow({ text, className = 'mt-[44px]' }: { text: string; className?: string }) {
+  return (
+    <div className={`mb-[60px] ml-[150px] mr-[160px] flex ${className} h-[180px] items-center justify-center gap-[16px] border-2 border-dashed border-[#D6D2C6] bg-white/40 text-[26px] font-bold text-[#8A8F8C]`}>
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#B5B1A6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z" />
+        <circle cx="12" cy="10" r="2.2" />
+      </svg>
+      {text}
+    </div>
+  );
+}
+
 interface WellSectionProps {
   kind: SectionKind;
-  wells: ExportWell[];
+  wells: MapWell[];
   selectedIds: Set<string>;
   onToggle: (id: string) => void;
   onToggleAll: (ids: string[], select: boolean) => void;
-  onVerdict: (id: string, verdict: WellVerdict) => void;
+  onVerdict: ((well: MapWell, verdict: Verdict) => void) | null;
   // the well being opened on the check page
   openingId: string | null;
   onOpen: (id: string) => void;
@@ -280,7 +309,7 @@ interface WellSectionProps {
 
 function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdict, openingId, onOpen }: WellSectionProps) {
   const listRef = useRef<HTMLDivElement>(null);
-  const { title, countColor } = SECTIONS[kind];
+  const { title, countColor, empty } = SECTIONS[kind];
   const allSelected = wells.length > 0 && wells.every((well) => selectedIds.has(well.id));
   const renderedCount = useRenderedCount(wells.length);
 
@@ -294,34 +323,40 @@ function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdic
           <h2 className="text-[40px] font-black leading-[normal] text-[#2C322F]">{title}</h2>
           <p className={`pb-[8px] text-[20px] font-black ${countColor}`}>{wells.length}口水井</p>
         </div>
-        <label className="flex cursor-pointer items-center gap-[12px] pb-[8px] text-[20px] font-black text-[#2C322F]">
-          全選
-          <SelectCircle checked={allSelected} size={30} label={`全選${title}`} onToggle={() => onToggleAll(wells.map((well) => well.id), !allSelected)} />
-        </label>
+        {/* nothing to select in an empty section */}
+        {wells.length > 0 && (
+          <label className="flex cursor-pointer items-center gap-[12px] pb-[8px] text-[20px] font-black text-[#2C322F]">
+            全選
+            <SelectCircle checked={allSelected} size={30} label={`全選${title}`} onToggle={() => onToggleAll(wells.map((well) => well.id), !allSelected)} />
+          </label>
+        )}
       </div>
 
-      <div className="mt-[24px] flex items-center gap-[5px] px-[60px]">
-        <ScrollArrow direction="left" onClick={() => scrollByCard(-1)} />
-        <div
-          ref={listRef}
-          className="flex flex-1 snap-x snap-mandatory overflow-x-auto px-[5px] pb-[60px] pt-[20px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          style={{ gap: CARD_GAP }}
-        >
-          {wells.length === 0 && <p className="py-[120px] text-[32px] font-bold text-[#6F7468]">目前沒有水井</p>}
-          {wells.slice(0, renderedCount).map((well) => (
-            <WellCard
-              key={well.id}
-              well={well}
-              selected={selectedIds.has(well.id)}
-              shared={openingId === well.id}
-              onToggle={() => onToggle(well.id)}
-              onVerdict={(verdict) => onVerdict(well.id, verdict)}
-              onOpen={() => onOpen(well.id)}
-            />
-          ))}
+      {wells.length === 0 ? (
+        <EmptyRow text={empty} />
+      ) : (
+        <div className="mt-[24px] flex items-center gap-[5px] px-[60px]">
+          <ScrollArrow direction="left" onClick={() => scrollByCard(-1)} />
+          <div
+            ref={listRef}
+            className="flex flex-1 snap-x snap-mandatory overflow-x-auto px-[5px] pb-[60px] pt-[20px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={{ gap: CARD_GAP }}
+          >
+            {wells.slice(0, renderedCount).map((well) => (
+              <WellCard
+                key={well.id}
+                well={well}
+                selected={selectedIds.has(well.id)}
+                shared={openingId === well.id}
+                onToggle={() => onToggle(well.id)}
+                onVerdict={onVerdict && ((verdict) => onVerdict(well, verdict))}
+                onOpen={() => onOpen(well.id)}
+              />
+            ))}
+          </div>
+          <ScrollArrow direction="right" onClick={() => scrollByCard(1)} />
         </div>
-        <ScrollArrow direction="right" onClick={() => scrollByCard(1)} />
-      </div>
+      )}
     </section>
   );
 }
@@ -364,12 +399,21 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
   const heroHeight = HERO_HEIGHT * scale;
   const paperMarker = useRef<HTMLDivElement>(null);
   const navLight = useNavLightPast(paperMarker);
-  // the placeholder wells with the verdicts given so far, here or on the check page (shared, so the sheet shows them
-  // again when it opens next time)
+  // the wells of the map the page was opened from (?record=; the newest finished map if none), with the verdicts
+  // given so far, here or on the check page
+  const loaded = useMapView(usePageSearchParams('/export').get('record'));
   const verdicts = useWellVerdicts();
-  const wells = useMemo(() => EXPORT_WELLS.map((well) => ({ ...well, verdict: verdictOf(well, verdicts) })), [verdicts]);
+  const fetched = loaded?.status === 'ready' ? loaded.value.wells : null;
+  const wells = useMemo(() => (fetched ?? []).map((well) => ({ ...well, verdict: verdictOf(well, verdicts) })), [fetched, verdicts]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [openingId, setOpeningId] = useState<string | null>(null);
+  const [verdictError, setVerdictError] = useState<string | null>(null);
+  const { session } = useSiteChrome();
+
+  const giveVerdict = (well: MapWell, verdict: Verdict) => {
+    setVerdictError(null);
+    saveVerdict(well, verdict).catch((error: Error) => setVerdictError(`${well.id}：${error.message}`));
+  };
 
   const wellsOf = (kind: SectionKind) => wells.filter((well) => lookOf(well.verdict) === kind);
 
@@ -387,7 +431,9 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
       return next;
     });
 
-  const sectionProps = { selectedIds, onToggle: toggleWell, onToggleAll: toggleAll, onVerdict: setWellVerdict, openingId, onOpen: setOpeningId };
+  const onVerdict = session && canVerify(session.role) ? giveVerdict : null;
+  const sectionProps = { selectedIds, onToggle: toggleWell, onToggleAll: toggleAll, onVerdict, openingId, onOpen: setOpeningId };
+  if (loaded?.status !== 'ready') return <LoadNotice loaded={loaded} />;
 
   const content = (
     <div className="relative mx-auto w-[1920px] pb-[160px]" style={{ zoom: scale, paddingTop: inSheet ? TOP_SPACE.sheet : TOP_SPACE.page }}>
@@ -397,9 +443,16 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
         onExport={() => downloadCsv(CSV_FILE_NAME, buildWellsCsv(wells.filter((well) => selectedIds.has(well.id))))}
         onPaper={inSheet}
       />
-      {SECTION_ORDER.map((kind) => (
-        <WellSection key={kind} kind={kind} wells={wellsOf(kind)} {...sectionProps} />
-      ))}
+      {verdictError && (
+        <p role="alert" className="mx-[60px] mt-[24px] text-[20px] font-bold text-[#BC5646]">
+          {verdictError}
+        </p>
+      )}
+      {wells.length === 0 ? (
+        <EmptyRow text={NO_WELLS} className="mt-[96px]" />
+      ) : (
+        SECTION_ORDER.map((kind) => <WellSection key={kind} kind={kind} wells={wellsOf(kind)} {...sectionProps} />)
+      )}
     </div>
   );
 

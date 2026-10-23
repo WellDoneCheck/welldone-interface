@@ -7,10 +7,11 @@ import {
   defaultTaskName,
   eventTitle,
   formatAgo,
+  liveTask,
   loadLevel,
   minutesLeft,
   nextSnapshot,
-  renameTask,
+  withRealTasks,
   serviceLevel,
   systemHealth,
   taskName,
@@ -53,14 +54,38 @@ test('a batch is named after when it was created until renamed', () => {
   assert.equal(taskName(snapshot.tasks.find((task) => task.id === 'task-216')), '嘉義沿海測繪');
 });
 
-test('renaming a batch renames it in its events too; a blank name goes back to the date', () => {
+const record = (status, extra = {}) => ({
+  id: 'task-a',
+  name: '2026-10-20 13:52',
+  timestamp: '2026-10-20 13:52',
+  createdAt: '2026-10-20T05:52:00.000Z',
+  createdById: null,
+  status,
+  statusLabel: '辨識失敗',
+  progress: 40,
+  tiles: { done: 4, total: 10 },
+  ...extra,
+});
+
+test('an imported map shows as a batch: its tiles as images, a default name left to the date', () => {
+  const task = liveTask(record('recognizing'));
+  assert.deepEqual(
+    { id: task.id, name: task.name, state: task.state, createdAt: task.createdAt, images: task.images, processed: task.processed, rate: task.rate, error: task.error },
+    { id: 'task-a', name: undefined, state: 'running', createdAt: Date.UTC(2026, 9, 20, 5, 52), images: 10, processed: 4, rate: 0, error: undefined },
+  );
+  assert.equal(liveTask(record('waiting')).state, 'queued');
+  assert.equal(liveTask(record('cutting', { tiles: null })).images, 0);
+  assert.equal(liveTask(record('done', { name: '雲林航照' })).name, '雲林航照');
+  assert.equal(liveTask(record('failed')).error, '辨識失敗');
+});
+
+test('once logged in, the real batches replace the simulated ones and their events', () => {
   const snapshot = createSnapshot(T0);
-  const renamed = renameTask(snapshot, 'task-218', '  雲林航照  ');
-  assert.equal(taskName(renamed.tasks.find((task) => task.id === 'task-218')), '雲林航照');
-  const started = renamed.events.find((event) => event.task?.id === 'task-218');
-  assert.equal(eventTitle(started, renamed.tasks), '開始辨識：雲林航照');
-  const cleared = renameTask(renamed, 'task-218', '   ');
-  assert.equal(taskName(cleared.tasks.find((task) => task.id === 'task-218')), defaultTaskName(T0 - 14 * MINUTE));
+  const real = withRealTasks(snapshot, [liveTask(record('done'))]);
+  assert.deepEqual(real.tasks.map((task) => task.id), ['task-a']);
+  assert.ok(real.events.length > 0);
+  assert.ok(real.events.every((event) => !event.task));
+  assert.deepEqual(real.services, snapshot.services);
 });
 
 test('an event keeps the name its batch had once the batch is no longer listed', () => {

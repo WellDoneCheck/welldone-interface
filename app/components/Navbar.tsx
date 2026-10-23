@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback, useSyncExternalStore } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
+import Image from 'next/image';
 import type { UserInfo } from './LoginPanel';
 import { lastVisitHref, subscribeToVisits, type VisitedPage } from '../utils/lastVisit';
 import { logoBackdropIsLight, subscribeToLogoBackdrop } from '../utils/logoBackdrop';
@@ -125,7 +126,8 @@ export default function Navbar({
       <div className={`flex items-center justify-between px-6 transition-all duration-300 md:px-8 ${style.pyClass}`}>
         {/* Logo */}
         <button type="button" onClick={handleLogoClick} className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-0 p-0">
-          <div className="h-8 w-8 rounded-md bg-[#62A4A7]" />
+          {/* taller than the word: centred on it, sticking out above and below without making the navbar taller */}
+          <Image src="/logo.webp" alt="" width={47} height={56} unoptimized priority className="-my-2 h-[56px] w-auto" />
           <span
             className={`text-4xl font-bold tracking-wide transition-colors duration-500 ${style.textColor}`}
             style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}
