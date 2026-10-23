@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import AccountSubPage from './AccountSubPage';
 import type { Role } from '../utils/session';
 import {
@@ -18,7 +18,14 @@ import { changeRole, createUser, deleteUser, fetchUsers, resetPassword } from '.
 
 // Wider than the other account pages: the account panel widens for this page (see LoginPanel)
 const CONTENT_WIDTH = 1100;
-const COLUMNS = 'grid grid-cols-[minmax(0,1fr)_180px_160px_160px_290px] items-center gap-x-[20px]';
+const COLUMNS = 'grid items-center gap-x-[20px]';
+// The size an fs-<px> text is shown at (as in globals.css): it stops shrinking at --min-text, while the columns go on
+const fs = (px: number) => `max(${px}px, var(--min-text, 0px))`;
+// The role column fits the role picker (editing: three labels of three characters), the actions column the row's
+// buttons and a confirmation (resetting a password), at whatever size their text is shown
+const ROLE_COLUMN = `calc(9 * ${fs(20)} + 52px)`;
+const ACTIONS_COLUMN = `max(290px, calc(8 * ${fs(22)} + 92px), calc(7 * ${fs(18)} + 4 * ${fs(22)} + 64px))`;
+const GRID: CSSProperties = { gridTemplateColumns: `minmax(0, 1fr) ${ROLE_COLUMN} 140px 140px ${ACTIONS_COLUMN}` };
 const ROW_HEIGHT = 96;
 const VISIBLE_ROWS = 8;
 // How long the confirmation above the list stays after an action
@@ -59,7 +66,7 @@ function RolePicker({ roles, value, onChange }: { roles: Role[]; value: Role; on
           type="button"
           aria-pressed={value === role}
           onClick={() => onChange(role)}
-          className={`h-[40px] whitespace-nowrap px-[10px] fs-20 font-bold transition-colors ${value === role ? 'bg-[#62A4A7] text-white' : 'text-[#3F7A7E] hover:bg-[#D1E6E7]/60'}`}
+          className={`h-[40px] whitespace-nowrap px-[8px] fs-20 font-bold transition-colors ${value === role ? 'bg-[#62A4A7] text-white' : 'text-[#3F7A7E] hover:bg-[#D1E6E7]/60'}`}
         >
           {ROLE_LABELS[role]}
         </button>
@@ -80,7 +87,7 @@ function TextButton({ children, tone = 'plain', disabled, title, onClick }: { ch
       disabled={disabled}
       title={title}
       onClick={onClick}
-      className={`h-[44px] px-[14px] fs-22 font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent ${tones[tone]}`}
+      className={`h-[44px] shrink-0 whitespace-nowrap px-[14px] fs-22 font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:bg-transparent ${tones[tone]}`}
     >
       {children}
     </button>
@@ -215,9 +222,9 @@ interface UserRowProps {
 function Confirm({ question, action, busy, onCancel, onConfirm }: { question: string; action: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
-      <span className="fs-20 font-bold text-[#98412F]">{question}</span>
+      <span className="whitespace-nowrap fs-18 font-bold text-[#98412F]">{question}</span>
       <TextButton onClick={onCancel}>取消</TextButton>
-      <button type="button" disabled={busy} onClick={onConfirm} className="h-[44px] bg-[#BC5646] px-[14px] fs-22 font-bold text-white transition-colors hover:bg-[#A84A3B] disabled:cursor-wait disabled:opacity-60">
+      <button type="button" disabled={busy} onClick={onConfirm} className="h-[44px] shrink-0 whitespace-nowrap bg-[#BC5646] px-[14px] fs-22 font-bold text-white transition-colors hover:bg-[#A84A3B] disabled:cursor-wait disabled:opacity-60">
         {action}
       </button>
     </>
@@ -231,7 +238,7 @@ function UserRow({ user, mode, roles, busy, onMode, onRoleChange, onPasswordRese
   return (
     <div className={`group relative border-b border-[#ECE9E0] transition-colors duration-200 ${background}`}>
       <span className="absolute inset-y-0 left-0 w-[4px] origin-center scale-y-0 bg-[#62A4A7] transition-transform duration-300 group-hover:scale-y-100" />
-      <div className={`${COLUMNS} px-[16px]`} style={{ minHeight: ROW_HEIGHT }}>
+      <div className={`${COLUMNS} px-[16px]`} style={{ ...GRID, minHeight: ROW_HEIGHT }}>
         <div className="flex min-w-0 items-center gap-[16px]">
           <Avatar user={user} />
           <span className="flex min-w-0 flex-col">
@@ -361,7 +368,7 @@ export default function UserManagementPage({ actor }: { actor: Role }) {
         {notice && <>{notice.tone === 'success' ? '✓' : '!'} {notice.text}</>}
       </p>
 
-      <div className={`${COLUMNS} mt-[6px] px-[16px] pb-[10px] fs-20 font-bold text-[#8A8E86]`}>
+      <div className={`${COLUMNS} mt-[6px] px-[16px] pb-[10px] fs-20 font-bold text-[#8A8E86]`} style={GRID}>
         <span>使用者</span>
         <span>角色</span>
         <span>註冊日期</span>
