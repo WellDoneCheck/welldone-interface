@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
 import TimelineCompare from './TimelineCompare';
-import BackToMapLink from './BackToMapLink';
+import BackToMapLink, { BACK_LINK_HEIGHT } from './BackToMapLink';
 import ExportEntry from './ExportEntry';
 import SharedTransition, { FROM_EXPORT_SHARE, PageBackgroundTransition, SHARED, TO_MAP, pagePart } from './SharedTransition';
 import { useFitScale, type FitStage } from './useFitScale';
@@ -19,6 +19,9 @@ import type { MapWell, Verdict } from '../utils/wells';
 // image, 972 wide and 702 tall) with at least 60px between them, scaled to fit the content area lined up with the navbar
 const PANEL_HEIGHT = 702;
 const INFO_WIDTH = 560;
+// The link back to the map sits just above the content (which starts where it does on the map page), in the navbar's
+// bottom margin, so it never covers the well id (whose line starts with some room above the letters)
+const BACK_LINK_TOP = CONTENT_TOP - BACK_LINK_HEIGHT;
 const OVERLAY_STAGE: FitStage = { width: INFO_WIDTH + 60 + 972, height: PANEL_HEIGHT, marginX: FRAME_MARGIN_X, marginY: FRAME_MARGIN_Y, minViewportWidth: 0 };
 
 // 是井 in the teal a verified well wears everywhere (VERDICT_COLOR); 不是井 keeps the page's own red
@@ -152,7 +155,7 @@ export default function CheckPage({ view }: { view: CheckView }) {
       <Background />
 
       {/* beside it, the map file the well was found in */}
-      <BackToMapLink href={backHref} transitionTypes={TO_MAP} mapFile={task} />
+      <BackToMapLink href={backHref} transitionTypes={TO_MAP} mapFile={task} top={BACK_LINK_TOP} />
 
       {/* lined up with the navbar left and right, centred in the height between the navbar and the window's bottom */}
       <div className="absolute flex items-center" style={{ ...pagePart('check-content'), top: CONTENT_TOP, bottom: PAGE_GAP, left: PAGE_GUTTER, right: PAGE_GUTTER }}>
