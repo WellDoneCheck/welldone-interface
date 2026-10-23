@@ -36,11 +36,14 @@ const HERO_PAPER_FROM = 0.85;
 type SectionKind = VerdictLook;
 const SECTION_ORDER: SectionKind[] = ['well', 'not-well', 'pending'];
 
-const SECTIONS: Record<SectionKind, { title: string; count: string; countColor: string }> = {
-  well: { title: '已驗證：是井', count: '是井 Well', countColor: 'text-[#62A4A7]' },
-  'not-well': { title: '已驗證：不是井', count: '不是井 Not a well', countColor: 'text-[#8A8F8C]' },
-  pending: { title: '未驗證的水井', count: '未驗證 Pending', countColor: 'text-[#BC5646]' },
+// empty: what the section says while it has no wells
+const SECTIONS: Record<SectionKind, { title: string; count: string; countColor: string; empty: string }> = {
+  well: { title: '已驗證：是井', count: '是井 Well', countColor: 'text-[#62A4A7]', empty: '還沒有驗證為「是井」的水井' },
+  'not-well': { title: '已驗證：不是井', count: '不是井 Not a well', countColor: 'text-[#8A8F8C]', empty: '還沒有驗證為「不是井」的水井' },
+  pending: { title: '未驗證的水井', count: '未驗證 Pending', countColor: 'text-[#BC5646]', empty: '所有水井都已驗證' },
 };
+// said once in place of the sections when the map has no wells at all
+const NO_WELLS = '這張地圖還沒有辨識到水井';
 
 const VERDICT_BUTTONS: { verdict: Verdict; label: string; className: string }[] = [
   { verdict: 'not-well', label: '不是井', className: 'border-[4px] border-[#8A8F8C] text-[#5E625F]' },
@@ -278,6 +281,20 @@ function useRenderedCount(total: number): number {
   return Math.min(count, total);
 }
 
+// In place of a section's row of cards while it has none (or of the sections, while the map has no wells): a dashed
+// slot lined up with the sections' titles
+function EmptyRow({ text, className = 'mt-[44px]' }: { text: string; className?: string }) {
+  return (
+    <div className={`mb-[60px] ml-[150px] mr-[160px] flex ${className} h-[180px] items-center justify-center gap-[16px] border-2 border-dashed border-[#D6D2C6] bg-white/40 text-[26px] font-bold text-[#8A8F8C]`}>
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#B5B1A6" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11Z" />
+        <circle cx="12" cy="10" r="2.2" />
+      </svg>
+      {text}
+    </div>
+  );
+}
+
 interface WellSectionProps {
   kind: SectionKind;
   wells: MapWell[];
@@ -292,7 +309,7 @@ interface WellSectionProps {
 
 function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdict, openingId, onOpen }: WellSectionProps) {
   const listRef = useRef<HTMLDivElement>(null);
-  const { title, countColor } = SECTIONS[kind];
+  const { title, countColor, empty } = SECTIONS[kind];
   const allSelected = wells.length > 0 && wells.every((well) => selectedIds.has(well.id));
   const renderedCount = useRenderedCount(wells.length);
 
@@ -306,34 +323,40 @@ function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdic
           <h2 className="text-[40px] font-black leading-[normal] text-[#2C322F]">{title}</h2>
           <p className={`pb-[8px] text-[20px] font-black ${countColor}`}>{wells.length}口水井</p>
         </div>
-        <label className="flex cursor-pointer items-center gap-[12px] pb-[8px] text-[20px] font-black text-[#2C322F]">
-          全選
-          <SelectCircle checked={allSelected} size={30} label={`全選${title}`} onToggle={() => onToggleAll(wells.map((well) => well.id), !allSelected)} />
-        </label>
+        {/* nothing to select in an empty section */}
+        {wells.length > 0 && (
+          <label className="flex cursor-pointer items-center gap-[12px] pb-[8px] text-[20px] font-black text-[#2C322F]">
+            全選
+            <SelectCircle checked={allSelected} size={30} label={`全選${title}`} onToggle={() => onToggleAll(wells.map((well) => well.id), !allSelected)} />
+          </label>
+        )}
       </div>
 
-      <div className="mt-[24px] flex items-center gap-[5px] px-[60px]">
-        <ScrollArrow direction="left" onClick={() => scrollByCard(-1)} />
-        <div
-          ref={listRef}
-          className="flex flex-1 snap-x snap-mandatory overflow-x-auto px-[5px] pb-[60px] pt-[20px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          style={{ gap: CARD_GAP }}
-        >
-          {wells.length === 0 && <p className="py-[120px] text-[32px] font-bold text-[#6F7468]">目前沒有水井</p>}
-          {wells.slice(0, renderedCount).map((well) => (
-            <WellCard
-              key={well.id}
-              well={well}
-              selected={selectedIds.has(well.id)}
-              shared={openingId === well.id}
-              onToggle={() => onToggle(well.id)}
-              onVerdict={onVerdict && ((verdict) => onVerdict(well, verdict))}
-              onOpen={() => onOpen(well.id)}
-            />
-          ))}
+      {wells.length === 0 ? (
+        <EmptyRow text={empty} />
+      ) : (
+        <div className="mt-[24px] flex items-center gap-[5px] px-[60px]">
+          <ScrollArrow direction="left" onClick={() => scrollByCard(-1)} />
+          <div
+            ref={listRef}
+            className="flex flex-1 snap-x snap-mandatory overflow-x-auto px-[5px] pb-[60px] pt-[20px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            style={{ gap: CARD_GAP }}
+          >
+            {wells.slice(0, renderedCount).map((well) => (
+              <WellCard
+                key={well.id}
+                well={well}
+                selected={selectedIds.has(well.id)}
+                shared={openingId === well.id}
+                onToggle={() => onToggle(well.id)}
+                onVerdict={onVerdict && ((verdict) => onVerdict(well, verdict))}
+                onOpen={() => onOpen(well.id)}
+              />
+            ))}
+          </div>
+          <ScrollArrow direction="right" onClick={() => scrollByCard(1)} />
         </div>
-        <ScrollArrow direction="right" onClick={() => scrollByCard(1)} />
-      </div>
+      )}
     </section>
   );
 }
@@ -425,9 +448,11 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
           {verdictError}
         </p>
       )}
-      {SECTION_ORDER.map((kind) => (
-        <WellSection key={kind} kind={kind} wells={wellsOf(kind)} {...sectionProps} />
-      ))}
+      {wells.length === 0 ? (
+        <EmptyRow text={NO_WELLS} className="mt-[96px]" />
+      ) : (
+        SECTION_ORDER.map((kind) => <WellSection key={kind} kind={kind} wells={wellsOf(kind)} {...sectionProps} />)
+      )}
     </div>
   );
 
