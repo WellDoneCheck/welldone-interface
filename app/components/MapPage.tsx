@@ -11,6 +11,7 @@ import { drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapLayer, u
 import { useSurveyMap } from './SurveyMap';
 import { TILE_COLOR, useTileProgressLayer } from './useTileProgressLayer';
 import { useRecognisedWells } from './useRecognisedWells';
+import { useCheckLink, usePrefetchCheckView } from './useCheckView';
 import { useCutImagery } from './useCutImagery';
 import type { TileState } from '../utils/tileProgress';
 import { pinScaleExpression, pinZoomScale } from '../utils/pinZoomScale';
@@ -605,11 +606,13 @@ function WellPhoto({ viewMode, well, shared, showing }: { viewMode: ViewMode; we
 // The aerial photo is the way into the verification page for this well
 function VerifyLink({ well, shared }: { well: MapWell; shared: boolean }) {
   const wellId = well.id;
+  const check = useCheckLink(wellId, TO_CHECK);
   return (
     <SharedTransition name={SHARED.wellPhoto} enabled={shared}>
       <Link
-        href={`/check?record=${wellId}`}
+        href={check.href}
         transitionTypes={TO_CHECK}
+        onNavigate={check.onNavigate}
         aria-label={`驗證 ${wellId}：比對多期影像`}
         className="group relative block h-[640px] w-[640px] outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
       >
@@ -756,6 +759,8 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
   // the AI starts once the map is cut, so its count is known only then; until then the imagery cut so far
   const imagery = useCutImagery(mapFile.id, arrivedImagery, tiles.recognised !== null) ?? tiles.imagery;
   const record = wells.find((candidate) => candidate.id === selectedId) ?? null;
+  // the open card's way into its check page (the photo) finds that page ready, so the photo flies there
+  usePrefetchCheckView(cardOpen ? (record?.id ?? null) : null);
 
   // the navbar's 地圖檢視 comes back to the map shown last
   useEffect(() => rememberVisit('map', mapFile.id), [mapFile.id]);

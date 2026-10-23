@@ -16,6 +16,7 @@ import { fileUrl } from '../utils/api';
 import { wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
 import { buildWellsCsv } from '../utils/wellsCsv';
 import { downloadCsv } from '../utils/csv';
+import { useCheckLink } from './useCheckView';
 
 // Laid out for the 1920px-wide Figma frame; height 0 lets only the viewport width decide the scale
 const EXPORT_STAGE: FitStage = { width: 1920, height: 0, marginX: 0, marginY: 0, minViewportWidth: 0 };
@@ -156,6 +157,8 @@ interface WellCardProps {
 
 function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellCardProps) {
   const badge = BADGES[lookOf(well.verdict)];
+  // read ahead as the pointer or focus comes to the photo, so the check page is ready when it is opened
+  const check = useCheckLink(well.id, FROM_EXPORT);
 
   return (
     // cards scrolled out of the row are not rendered until they come into view (50 cards with large shadows)
@@ -165,9 +168,12 @@ function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellC
             one whose parts move there */}
         <SharedTransition name={SHARED.wellPhoto} enabled={shared} share={FROM_EXPORT_SHARE}>
           <Link
-            href={`/check?record=${well.id}`}
+            href={check.href}
             transitionTypes={FROM_EXPORT}
             onClick={onOpen}
+            onNavigate={check.onNavigate}
+            onPointerEnter={check.readAhead}
+            onFocus={check.readAhead}
             aria-label={`檢查 ${well.id}：比對多期影像`}
             className="group/photo absolute inset-0 block overflow-hidden outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
           >
