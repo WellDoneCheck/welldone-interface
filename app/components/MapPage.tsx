@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
 import ModelRender from './ModelRender';
@@ -12,6 +13,7 @@ import { useSurveyMap } from './SurveyMap';
 import { TILE_COLOR, useTileProgressLayer } from './useTileProgressLayer';
 import { useRecognisedWells } from './useRecognisedWells';
 import { useCheckLink, usePrefetchCheckView } from './useCheckView';
+import { ButtonIcon, EXPAND_PATH, ExpandedView, ImageButton, MarkerIcon, WellMarkerPin } from './CompareImage';
 import { useCutImagery } from './useCutImagery';
 import type { TileState } from '../utils/tileProgress';
 import { pinScaleExpression, pinZoomScale } from '../utils/pinZoomScale';
@@ -599,12 +601,56 @@ function ViewTab({ mode, label, top, color, active, onSelect }: ViewTabProps) {
 // Aerial: the well's photo, cut from its map by the backend.
 // Model: fake 3D render (click to generate), offset 4/6px inside the card as in Figma.
 function WellPhoto({ viewMode, well, shared, showing }: { viewMode: ViewMode; well: MapWell; shared: boolean; showing: boolean }) {
-  if (viewMode === 'aerial') return <VerifyLink well={well} shared={shared} />;
+  if (viewMode === 'aerial') return <AerialPhoto well={well} shared={shared} />;
   return <ModelRender playing={showing} />;
 }
 
+// The photo as the expanded view shows it (as large as the check page's)
+const EXPANDED_PHOTO_SIZE = 702;
+
+// The aerial photo with its marker, buttons over its corner to grow it over the whole page (to zoom into) and to hide
+// the marker, and the way into the verification page (the photo itself)
+function AerialPhoto({ well, shared }: { well: MapWell; shared: boolean }) {
+  const [markerShown, setMarkerShown] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const photoRef = useRef<HTMLDivElement>(null);
+  const measureOrigin = useCallback(() => photoRef.current?.getBoundingClientRect() ?? null, []);
+  const toggleMarker = () => setMarkerShown((shown) => !shown);
+  const capture = { id: well.recordId, capturedAt: well.timestamp, image: wellImageUrl(well, EXPANDED_PHOTO_SIZE) };
+
+  return (
+    // hidden in place while the expanded view stands for it
+    <div ref={photoRef} className="relative h-full w-full" style={{ visibility: expanded ? 'hidden' : undefined }}>
+      <VerifyLink well={well} shared={shared} markerShown={markerShown} />
+      <div className="absolute right-4 top-4 flex flex-col gap-[8px]">
+        <ImageButton label="放大檢視" onClick={() => setExpanded(true)}>
+          <ButtonIcon path={EXPAND_PATH} />
+        </ImageButton>
+        <ImageButton label={markerShown ? '隱藏水井定位標' : '顯示水井定位標'} pressed={markerShown} onClick={toggleMarker}>
+          <MarkerIcon shown={markerShown} />
+        </ImageButton>
+      </div>
+      {/* on the page's body: out of the page's scaled stage and the card's flip, over everything */}
+      {expanded &&
+        createPortal(
+          <ExpandedView
+            captures={[capture]}
+            compareIndex={0}
+            position={50}
+            onPosition={() => {}}
+            markerShown={markerShown}
+            measureOrigin={measureOrigin}
+            onToggleMarker={toggleMarker}
+            onClose={() => setExpanded(false)}
+          />,
+          document.body,
+        )}
+    </div>
+  );
+}
+
 // The aerial photo is the way into the verification page for this well
-function VerifyLink({ well, shared }: { well: MapWell; shared: boolean }) {
+function VerifyLink({ well, shared, markerShown }: { well: MapWell; shared: boolean; markerShown: boolean }) {
   const wellId = well.id;
   const check = useCheckLink(wellId, TO_CHECK);
   return (
@@ -625,6 +671,7 @@ function VerifyLink({ well, shared }: { well: MapWell; shared: boolean }) {
           // no photo (the well is outside its map's imagery): the card's paper shows instead of a broken image
           onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
         />
+        {markerShown && <WellMarkerPin />}
         <span
           className={`absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-8 opacity-0 transition-opacity duration-300 ${MOTION} group-hover:opacity-100 group-focus-visible:opacity-100`}
         >
