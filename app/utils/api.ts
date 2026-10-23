@@ -6,6 +6,9 @@ import { clearSession, getSession } from './session';
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3000';
 
 const NETWORK_ERROR = '無法連線到伺服器';
+const STALL_ERROR = '連線逾時，請重試';
+// a send that puts no more bytes on the wire for this long has stalled (a dead connection may never fire onerror)
+const UPLOAD_STALL_MS = 30000;
 // A success that is not JSON (e.g. a web page) comes from something other than the backend
 const NOT_BACKEND_ERROR = `伺服器回應的不是 API 資料，請確認 NEXT_PUBLIC_API_URL（${API_URL}）指向後端`;
 
@@ -73,27 +76,65 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   return readAnswer<T>(response.status, await response.text(), options.keepSessionOn401);
 }
 
-// Sends a file as the form field `file`, reporting how much of it has gone (0–100). XMLHttpRequest, as fetch cannot
-// report upload progress.
-export function uploadFile<T>(path: string, file: File, onProgress: (percent: number) => void): Promise<T> {
+// Posts a form, reporting how much of it has gone up: the percent (0–100) and the real bytes sent so far and in total,
+// as the browser puts them on the wire. XMLHttpRequest, as fetch cannot report upload progress.
+function sendForm<T>(path: string, form: FormData, onProgress?: (percent: number, loaded: number, total: number) => void): Promise<T> {
   return new Promise((resolve, reject) => {
     const request = new XMLHttpRequest();
     request.open('POST', API_URL + path);
     const token = getSession()?.token;
     if (token) request.setRequestHeader('Authorization', `Bearer ${token}`);
-    request.upload.onprogress = (event) => event.lengthComputable && onProgress((event.loaded / event.total) * 100);
+
+    // abort a send that stalls, and surface it as a reachable-but-stalled error; the watch is dropped once the body is
+    // fully on the wire, so a slow (but still progressing) upload or a server that takes a while to answer is not cut off
+    let stall: ReturnType<typeof setTimeout> | undefined;
+    const watchStall = () => {
+      clearTimeout(stall);
+      stall = setTimeout(() => request.abort(), UPLOAD_STALL_MS);
+    };
+    const stopStall = () => clearTimeout(stall);
+
+    request.upload.onprogress = (event) => {
+      watchStall();
+      if (onProgress && event.lengthComputable) onProgress((event.loaded / event.total) * 100, event.loaded, event.total);
+    };
+    request.upload.onloadend = stopStall;
     request.onload = () => {
+      stopStall();
       try {
         resolve(readAnswer<T>(request.status, request.responseText));
       } catch (error) {
         reject(error);
       }
     };
-    request.onerror = () => reject(new ApiError(0, NETWORK_ERROR));
-    const form = new FormData();
-    form.append('file', file);
+    request.onerror = () => {
+      stopStall();
+      reject(new ApiError(0, NETWORK_ERROR));
+    };
+    request.onabort = () => {
+      stopStall();
+      reject(new ApiError(0, STALL_ERROR));
+    };
+    watchStall();
     request.send(form);
   });
+}
+
+// Sends a whole file as the form field `file` in one request.
+export function uploadFile<T>(path: string, file: File, onProgress: (percent: number, loaded: number, total: number) => void): Promise<T> {
+  const form = new FormData();
+  form.append('file', file);
+  return sendForm<T>(path, form, onProgress);
+}
+
+// Sends one chunk of a resumable upload (§ chunked upload), reporting the bytes of this chunk sent so far.
+export function uploadChunk(path: string, chunk: Blob, fields: { uploadId: string; chunkIndex: number; totalChunks: number }, onLoaded: (loaded: number) => void): Promise<void> {
+  const form = new FormData();
+  form.append('file', chunk);
+  form.append('uploadId', fields.uploadId);
+  form.append('chunkIndex', String(fields.chunkIndex));
+  form.append('totalChunks', String(fields.totalChunks));
+  return sendForm<void>(path, form, (_percent, loaded) => onLoaded(loaded));
 }
 
 // The full address of a backend file with the token in it, for <img> and download links that cannot send headers (§2.3)

@@ -27,7 +27,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 | --- | --- | --- |
 | 登入、改密碼（預設密碼強制改） | `POST /auth/login`、`PATCH /users/me/password`（改完重新登入） | `auth.ts`、`LoginPanel`、`ChangePasswordPage` |
 | 帳號管理 | `GET/POST /users`、`PATCH /users/:id/role`、`PATCH /users/:id/reset-password`、`DELETE /users/:id` | `usersApi.ts`、`UserManagementPage` |
-| 影像匯入 | `GET /tasks`、`GET /tasks/:id/progress`（`no-store` 輪詢，見 §5 #1）、`POST /tasks/upload`、`PATCH /tasks/:id/name`、`DELETE /tasks/:id`、`POST /tasks/:id/ai/retry`（「重試辨識」：辨識停下且還有失敗或沒跑到的小圖時，不帶 body 全部重試） | `useTaskRecords`、`UploadPage` |
+| 影像匯入 | `GET /tasks`、`GET /tasks/:id/progress`（`no-store` 輪詢，見 §5 #1）、分片上傳（見 §6）、`PATCH /tasks/:id/name`、`DELETE /tasks/:id`、`POST /tasks/:id/ai/retry`（「重試辨識」：辨識停下且還有失敗或沒跑到的小圖時，不帶 body 全部重試） | `useTaskRecords`、`UploadPage`、`chunkedUpload.ts` |
 | 地圖檢視 | `GET /tasks`（`?record=` 或最新完成的）、`GET /wells?taskId=`、`GET /tasks/:id/tiles/tilejson` 與圖磚、`GET /wells/:id/image` | `routeRecords.ts` 的 `loadMapView`、`MapPage`、`TileMap` |
 | 地圖上的小圖進度：切圖中已切好的直接顯示影像、旁邊還沒切到的標灰色；切完標出還沒辨識完的（辨識中閃動、失敗、等待辨識）；切完自動載入影像 | `GET /tasks/:id`（`split_status`）、`GET /tasks/:id/tiles/cut`（格線、已切好與空白的小圖、整張影像範圍、已切好部分的圖磚網址；後端新增）、`GET /tasks/:id/tiles/cut/{z}/{x}/{y}.png`（後端新增）、`GET /tasks/:id/ai/progress`，每 5 秒直到辨識結束；每多辨識完小圖就重讀 `GET /wells?taskId=`，地圖的圖釘與左下角的數字跟著更新；切完讀 `tilejson` | `tileProgress.ts`、`useTileProgressLayer`、`useRecognisedWells`、`useCutImagery`、`MapPage` 的圖例 |
 | 地圖名稱改名（地圖、檢查、比對頁） | `PATCH /tasks/:id/name`（空白＝回到預設名稱） | `RecordName` |
@@ -60,3 +60,16 @@ operator 只能刪自己上傳的地圖；只有 root 能建帳號。
 - 切圖中影像每多切一張就換新網址重讀，畫面會閃一下。不用 `metadata`：它列整個網格（含空白）、舊任務的位置是錯的、`status` 也不會更新。
 - 監控的辨識任務沒有預估剩餘時間與找到幾口井（後端沒有提供），以小圖張數當影像張數。
 - 驗證結果在同一個分頁內會立刻反映到各頁（`wellVerdicts.ts`）；別人改的要重新開頁才看得到。
+
+## 分片上傳
+
+影像以分片方式送上後端，`chunkedUpload.ts` 負責編排，`UploadPage` 一次送一個檔：
+
+1. `POST /tasks/upload/init`：`{ filename, totalSize, chunkSize }` → `{ uploadId }`；分片總數 `totalChunks = ceil(totalSize / chunkSize)` 由後端算，前端用 16 MiB 一片（後端單片上限 50 MiB、單檔上限 20 GiB）。
+2. `GET /tasks/upload/status/:uploadId` → `{ totalChunks, uploadedChunks: number[], completed }`；**續傳**靠 `uploadedChunks` 跳過伺服器已有的分片。
+3. `POST /tasks/upload/chunk`（multipart：`file`、`uploadId`、`chunkIndex`、`totalChunks`）逐片送；用 XHR 取真實 `loaded` 位元組，`UploadPage` 據此算整體進度、真實速度與剩餘時間。單片失敗重試 3 次（後端會保留已收到的分片）。
+4. `POST /tasks/upload/complete`：`{ uploadId, totalChunks }` → 合併分片、建立 `Task`（與 `GET /tasks` 同型別）。
+
+- 上傳開始時左面板的放置區與檔案清單收合，中央顯示整體進度（`UploadProgress`）；全部完成後停留 `DONE_PAUSE` 再展開。
+- `GET /tasks/upload/active`（所有人的進行中分片上傳：`filename`、`totalSize`、`progress`、`uploadedById`、`startedAt`；不含 `uploadId`）目前前端尚未使用。
+- 續傳只在同一分頁內有效：失敗的檔保留 `uploadId`，重試時從 `status` 接續。跨頁面重整無法自動續傳（瀏覽器無法重讀檔案，需重新選檔）。

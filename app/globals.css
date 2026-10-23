@@ -472,3 +472,33 @@ body {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* 影像匯入：檔案滑入清單；上傳中的進度條條紋流動、前端發光；傳完整列閃綠、勾勾彈出；拖曳檔案時放置區呼吸 */
+@keyframes upload-file-in {
+  from { opacity: 0; transform: translateX(-16px); }
+}
+@keyframes upload-stripes {
+  to { background-position: 24px 0; }
+}
+@keyframes upload-glow {
+  0%, 100% { opacity: 0.55; transform: translate(50%, -50%) scale(0.8); }
+  50% { opacity: 1; transform: translate(50%, -50%) scale(1.25); }
+}
+@keyframes upload-done-flash {
+  from { background-color: rgb(52 211 153 / 0.28); }
+  to { background-color: transparent; }
+}
+@keyframes upload-check-pop {
+  0% { opacity: 0; transform: scale(0.4); }
+  60% { opacity: 1; transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+@keyframes upload-drop-breathe {
+  0%, 100% { background-color: rgb(115 186 192 / 0.08); }
+  50% { background-color: rgb(115 186 192 / 0.24); }
+}
+@keyframes upload-arrow-rise {
+  0% { opacity: 0; transform: translateY(6px); }
+  30%, 70% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-6px); }
+}

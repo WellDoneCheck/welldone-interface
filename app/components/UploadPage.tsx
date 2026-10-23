@@ -3,8 +3,8 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { uploadFile } from '../utils/api';
-import { canDelete, canRename, canRetry, canUpload, displayName, groupByYear, uploadError, type RecordStatus, type Task, type TaskRecord } from '../utils/tasks';
+import { uploadInChunks } from '../utils/chunkedUpload';
+import { canDelete, canRename, canRetry, canUpload, displayName, groupByYear, uploadError, type RecordStatus, type TaskRecord } from '../utils/tasks';
 import { useTaskRecords } from './useTaskRecords';
 import { useSiteChrome } from './SiteChrome';
 import { useFitScale, type FitStage } from './useFitScale';
@@ -25,6 +25,15 @@ import { CONTENT_TOP, FRAME_MARGIN_X, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, use
 // From xl (1280px) up the panels then stretch to fill that area; below it they stack at their own size.
 const UPLOAD_STAGE: FitStage = { width: 1784, height: 869, marginX: FRAME_MARGIN_X, marginY: FRAME_MARGIN_Y, minViewportWidth: 1280 };
 
+// the drop zone and file list fold away (FOLD_TIME) before an upload's progress takes their place; once it is done,
+// the progress stays at 100% for DONE_PAUSE before they open again
+const FOLD_TIME = 500;
+const DONE_PAUSE = 800;
+// the big progress bar's flowing dashes
+const SENDING_STRIPES = 'repeating-linear-gradient(90deg, #3F7A7E 0 12px, #73BAC0 12px 24px)';
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /* ─── Types ─────────────────────────────────────────────────────── */
 
 interface UploadFile {
@@ -32,8 +41,20 @@ interface UploadFile {
   file: File;
   progress: number;
   status: 'pending' | 'uploading' | 'done' | 'error';
+  // bytes of this file sent so far (for the overall progress and speed)
+  loaded?: number;
+  // the resumable upload's id, kept so a retry resumes rather than restarts
+  uploadId?: string;
   // why it was not uploaded
   error?: string;
+  // the backend would refuse this file's format (§5), so it is marked failed before any upload and never retried
+  rejected?: boolean;
+}
+
+// A file the next upload will send: a new one, or one that failed at runtime (not a format rejection). A runtime
+// failure resumes from its uploadId when the backend already holds chunks, or starts over when it has none.
+function isUploadable(file: UploadFile): boolean {
+  return file.status === 'pending' || (file.status === 'error' && !file.rejected);
 }
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
@@ -43,6 +64,10 @@ function formatSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+}
+
+function formatSeconds(seconds: number): string {
+  return seconds < 60 ? `${seconds} 秒` : `${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
 }
 
 function randomId(): string {
@@ -421,7 +446,11 @@ function FileRow({ file, index, onRemove }: { file: UploadFile; index: number; o
   const progress = isDone ? 100 : file.status === 'uploading' ? file.progress : 0;
 
   return (
-    <div className="relative flex h-[61px] items-start px-0.5">
+    <div
+      className={`relative flex h-[61px] items-start px-0.5 motion-reduce:animate-none ${
+        isDone ? 'animate-[upload-done-flash_2s_ease-out_both]' : 'animate-[upload-file-in_400ms_ease-out_both]'
+      }`}
+    >
       <span className="mt-[19px] w-[33px] text-xl leading-[23px] text-[#6F7468]" style={{ fontFamily: 'var(--font-geist-sans), sans-serif' }}>
         {String(index + 1).padStart(2, '0')}
       </span>
@@ -431,14 +460,16 @@ function FileRow({ file, index, onRemove }: { file: UploadFile; index: number; o
         <div className="relative mt-[5px] h-[1.5px]">
           <Image src="/upload/progress-track.svg" alt="" width={406} height={2} className="absolute inset-0 h-[1.5px] w-full" />
           {!hasError && progress > 0 && (
-            <Image
-              src="/upload/progress-fill.svg"
-              alt=""
-              width={303}
-              height={2}
-              className="absolute inset-y-0 left-0 h-[1.5px]"
-              style={{ width: `${progress}%` }}
-            />
+            <div className="absolute inset-y-0 left-0 h-[1.5px]" style={{ width: `${progress}%` }}>
+              <Image src="/upload/progress-fill.svg" alt="" width={303} height={2} className="absolute inset-0 h-[1.5px] w-full" />
+              {file.status === 'uploading' && (
+                <>
+                  {/* teal dashes flowing to the right, with a glowing head at the leading edge */}
+                  <span className="absolute inset-0 bg-[repeating-linear-gradient(90deg,transparent_0_12px,rgba(255,255,255,0.65)_12px_24px)] animate-[upload-stripes_1s_linear_infinite] motion-reduce:animate-none" />
+                  <span className="absolute right-0 top-1/2 h-2 w-2 rounded-full bg-[#73BAC0] shadow-[0_0_10px_3px_rgba(115,186,192,0.9)] animate-[upload-glow_1s_ease-in-out_infinite] motion-reduce:animate-none" />
+                </>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -454,7 +485,7 @@ function FileRow({ file, index, onRemove }: { file: UploadFile; index: number; o
             </button>
           </>
         ) : isDone ? (
-          <span className="text-[#3F7A7E]">完成</span>
+          <span className="text-[#3F7A7E] animate-[upload-check-pop_700ms_ease-out_both] motion-reduce:animate-none">✓ 完成</span>
         ) : file.status === 'uploading' ? (
           <span className="text-[#3F7A7E]">{Math.round(file.progress)}%</span>
         ) : (
@@ -463,6 +494,51 @@ function FileRow({ file, index, onRemove }: { file: UploadFile; index: number; o
       </div>
 
       <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="absolute bottom-0 left-[-2px] h-px w-[582px] max-w-none" />
+    </div>
+  );
+}
+
+/* ─── Upload progress (takes the drop zone and file list's place while an upload is going) ──────── */
+
+function UploadingIcon() {
+  return (
+    <span className="relative flex h-[64px] w-[64px] items-center justify-center">
+      <span className="absolute inset-0 border-2 border-[#62A4A7] opacity-0 animate-[well-ripple_1.8s_cubic-bezier(0.22,1,0.36,1)_infinite] motion-reduce:hidden" />
+      <span className="absolute inset-[10px] bg-[#73BAC0]/20" />
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#3F7A7E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="relative overflow-visible">
+        <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" />
+        <g className="animate-[upload-arrow-rise_1.2s_ease-in-out_infinite] motion-reduce:animate-none">
+          <path d="M12 15V4" />
+          <path d="M7 9l5-5 5 5" />
+        </g>
+      </svg>
+    </span>
+  );
+}
+
+function UploadProgress({ progress, fileName, fileNumber, fileCount, merging }: { progress: number; fileName: string; fileNumber: number; fileCount: number; merging: boolean }) {
+  return (
+    <div className="flex h-full min-h-[260px] flex-col items-center justify-center gap-3 text-center">
+      <UploadingIcon />
+      <p className="text-[40px] font-bold leading-[48px] tabular-nums text-[#3F7A7E]">{Math.floor(progress)}%</p>
+      <div className="relative h-[6px] w-[420px] overflow-hidden bg-[#73BAC0]/20">
+        <div
+          className="absolute inset-y-0 left-0 transition-[width] duration-100 ease-linear animate-[upload-stripes_1s_linear_infinite] motion-reduce:animate-none"
+          style={{ width: `${progress}%`, backgroundImage: SENDING_STRIPES }}
+        />
+      </div>
+      {fileNumber > 0 ? (
+        <>
+          <p className="max-w-[480px] truncate text-base leading-[23px] text-[#6F7468]">{`第 ${fileNumber}／${fileCount} 個　${fileName}`}</p>
+          {merging ? (
+            <p className="text-[13px] text-[#3F7A7E]">正在合併中…</p>
+          ) : (
+            <p className="text-[13px] text-[#6F7468]">上傳完成前無法加入新檔案</p>
+          )}
+        </>
+      ) : (
+        <p className="text-base leading-[23px] text-emerald-600">✓ 全部上傳完成</p>
+      )}
     </div>
   );
 }
@@ -480,6 +556,12 @@ export default function UploadPage() {
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  // the drop zone and file list folded away, the upload's progress in their place
+  const [folded, setFolded] = useState(false);
+  // the current file's chunks are all sent and the backend is merging them (progress sits at 100% meanwhile)
+  const [merging, setMerging] = useState(false);
+  // bytes per second over the wire, smoothed; 0 when not uploading
+  const [speed, setSpeed] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const yearRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -547,7 +629,7 @@ export default function UploadPage() {
     // files the backend would refuse are marked at once (it answers other formats with a 500, Backend-SPEC §5)
     const newFiles: UploadFile[] = arr.map((f) => {
       const error = uploadError(f) ?? undefined;
-      return { id: randomId(), file: f, progress: 0, status: error ? 'error' : 'pending', error };
+      return { id: randomId(), file: f, progress: 0, status: error ? 'error' : 'pending', error, rejected: error != null };
     });
     setFiles((prev) => [...prev, ...newFiles]);
   }, []);
@@ -571,21 +653,60 @@ export default function UploadPage() {
   const updateFile = (id: string, change: Partial<UploadFile>) =>
     setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...change } : f)));
 
-  // One file at a time, each becoming a map in the list once the backend has it
+  // One file at a time, each sent in resumable chunks and becoming a map in the list once the backend has merged it.
+  // The drop zone and file list fold away first (FOLD_TIME) so the upload's progress can take their place.
   const startUpload = async () => {
+    // new files plus ones that failed at runtime (a format rejection is left alone); each resumes from its uploadId
+    // when the backend already holds chunks, or starts over when it has none
+    const pending = files.filter(isUploadable);
+    if (pending.length === 0) return;
     setUploading(true);
-    for (const item of files.filter((f) => f.status === 'pending')) {
-      updateFile(item.id, { status: 'uploading' });
+    setFolded(true);
+    setSpeed(0);
+    // the files sent last time make way, so this upload's progress is its own
+    setFiles((prev) => prev.filter((f) => f.status !== 'done'));
+    await delay(FOLD_TIME);
+
+    // real upload speed, from the bytes actually going over the wire: completed files, plus the one in flight
+    let completedBytes = 0;
+    let sample = { time: performance.now(), bytes: 0 };
+    for (const item of pending) {
+      updateFile(item.id, { status: 'uploading', loaded: 0 });
       try {
-        const task = await uploadFile<Task>('/tasks/upload', item.file, (progress) => updateFile(item.id, { progress }));
-        updateFile(item.id, { status: 'done', progress: 100 });
+        const task = await uploadInChunks(item.file, {
+          onUploadId: (uploadId) => updateFile(item.id, { uploadId }),
+          onMerging: () => setMerging(true),
+          onProgress: (sent) => {
+            updateFile(item.id, { loaded: sent, progress: (sent / item.file.size) * 100 });
+            const now = performance.now();
+            const total = completedBytes + sent;
+            if (now - sample.time >= 400) {
+              const instant = ((total - sample.bytes) / (now - sample.time)) * 1000;
+              setSpeed((prev) => (prev > 0 ? prev * 0.6 + instant * 0.4 : instant));
+              sample = { time: now, bytes: total };
+            }
+          },
+        }, item.uploadId);
+        updateFile(item.id, { status: 'done', progress: 100, loaded: item.file.size });
+        setMerging(false);
+        completedBytes += item.file.size;
         add(task);
       } catch (error) {
+        setMerging(false);
         updateFile(item.id, { status: 'error', error: (error as Error).message });
       }
     }
     setUploading(false);
+    setSpeed(0);
+    scrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    setTimeout(() => setFolded(false), DONE_PAUSE);
   };
+
+  // while an upload is going, files dragged over the drop zone are refused (and not opened by the browser either)
+  const refuseDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'none';
+  }, []);
 
   // Runs a rename or delete, saying why when the backend refuses it
   const runAction = async (action: () => Promise<void>) => {
@@ -603,6 +724,15 @@ export default function UploadPage() {
 
   const totalSize = files.reduce((s, f) => s + f.file.size, 0);
   const listMessage = loadError ?? (loading ? '載入中…' : records.length === 0 ? '尚無匯入紀錄' : visibleGroups.length === 0 ? '找不到符合的紀錄' : null);
+
+  // the files going up in this upload, for the folded progress view and footer
+  const sending = files.filter((f) => f.status === 'uploading' || f.status === 'done');
+  const sendingSize = sending.reduce((s, f) => s + f.file.size, 0);
+  const sentSize = sending.reduce((s, f) => s + (f.status === 'done' ? f.file.size : f.loaded ?? 0), 0);
+  const overallProgress = sendingSize > 0 ? (sentSize / sendingSize) * 100 : 0;
+  const currentNumber = sending.findIndex((f) => f.status !== 'done') + 1;
+  const currentName = sending.find((f) => f.status !== 'done')?.file.name ?? '';
+  const etaSeconds = speed > 0 ? Math.ceil((sendingSize - sentSize) / speed) : 0;
 
   return (
     <div className="relative min-h-screen overflow-hidden" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
@@ -639,61 +769,89 @@ export default function UploadPage() {
               </div>
               <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="mt-0 h-px w-[582px] max-w-none" />
 
-              {/* Drop Zone */}
+              {/* Drop Zone (folds up first when an upload starts; opens again once the progress has gone) */}
               <div
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onClick={() => uploadAllowed && inputRef.current?.click()}
-                className={`relative mt-4 h-[183.5px] w-[583.5px] max-w-none transition-opacity duration-300 ${
-                  uploadAllowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
-                } ${isDragging ? 'opacity-80' : ''}`}
+                className={`grid transition-[grid-template-rows,opacity] duration-500 ease-in-out ${
+                  folded ? 'grid-rows-[0fr] opacity-0' : 'grid-rows-[1fr] delay-500'
+                }`}
               >
-                <input
-                  ref={inputRef}
-                  type="file"
-                  multiple
-                  accept=".tif,.tiff"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files) addFiles(e.target.files);
-                    e.target.value = '';
-                  }}
-                />
-                <Image src="/upload/drop-frame.svg" alt="" width={584} height={184} className="pointer-events-none absolute inset-0 max-w-none" />
-                <div className="flex flex-col items-center pt-[53px] text-center text-2xl leading-[34px]">
-                  {uploadAllowed ? (
-                    <p className="text-[#2C322F]">
-                      拖曳檔案至此，或 <span className="text-[#3F7A7E]">選擇檔案</span>
-                    </p>
-                  ) : (
-                    <p className="text-[#2C322F]">檢視者帳號無法上傳影像</p>
-                  )}
-                  <p className="text-[#6F7468]">支援 .tif／.tiff</p>
+                <div className={`min-h-0 ${folded ? 'overflow-hidden' : ''}`}>
+                  <div
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleDrop}
+                    onClick={() => uploadAllowed && inputRef.current?.click()}
+                    className={`relative mt-4 h-[183.5px] w-[583.5px] max-w-none transition-opacity duration-300 ${
+                      uploadAllowed ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'
+                    } ${isDragging ? 'opacity-80 animate-[upload-drop-breathe_1.2s_ease-in-out_infinite] motion-reduce:animate-none' : ''}`}
+                  >
+                    <input
+                      ref={inputRef}
+                      type="file"
+                      multiple
+                      accept=".tif,.tiff"
+                      className="hidden"
+                      onChange={(e) => {
+                        if (e.target.files) addFiles(e.target.files);
+                        e.target.value = '';
+                      }}
+                    />
+                    <Image src="/upload/drop-frame.svg" alt="" width={584} height={184} className="pointer-events-none absolute inset-0 max-w-none" />
+                    {isDragging && (
+                      <span className="pointer-events-none absolute left-1/2 top-[18px] -translate-x-1/2">
+                        <svg aria-hidden width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#3F7A7E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="animate-[upload-arrow-rise_1.2s_ease-in-out_infinite] motion-reduce:animate-none">
+                          <path d="M12 19V5M5 12l7-7 7 7" />
+                        </svg>
+                      </span>
+                    )}
+                    <div className="flex flex-col items-center pt-[53px] text-center text-2xl leading-[34px]">
+                      {uploadAllowed ? (
+                        <p className="text-[#2C322F]">
+                          拖曳檔案至此，或 <span className="text-[#3F7A7E]">選擇檔案</span>
+                        </p>
+                      ) : (
+                        <p className="text-[#2C322F]">檢視者帳號無法上傳影像</p>
+                      )}
+                      <p className="text-[#6F7468]">支援 .tif／.tiff</p>
+                    </div>
+                  </div>
+                  <div className="h-[44px]" />
                 </div>
               </div>
 
-              {/* File List */}
-              <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="mt-[44px] h-px w-[582px] max-w-none" />
-              <div className="flex-1 overflow-y-auto">
-                {files.length === 0 ? (
-                  <div className="py-8 text-center text-base text-[#6F7468]">尚無檔案</div>
-                ) : (
-                  files.map((file, idx) => <FileRow key={file.id} file={file} index={idx} onRemove={removeFile} />)
-                )}
+              {/* File List (folds up with the drop zone; the upload's progress fades in in its place) */}
+              <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="h-px w-[582px] max-w-none" />
+              <div className="relative min-h-0 flex-1" onDragOver={folded ? refuseDrop : undefined} onDrop={folded ? refuseDrop : undefined}>
+                <div className={`h-full origin-top overflow-y-auto transition-[transform,opacity] duration-500 ease-in-out ${folded ? 'scale-y-0 opacity-0' : 'delay-500'}`}>
+                  {files.length === 0 ? (
+                    <div className="py-8 text-center text-base text-[#6F7468]">尚無檔案</div>
+                  ) : (
+                    files.map((file, idx) => <FileRow key={file.id} file={file} index={idx} onRemove={removeFile} />)
+                  )}
+                </div>
+                <div className={`absolute inset-0 transition-opacity duration-500 ${folded ? 'opacity-100 delay-500' : 'pointer-events-none opacity-0'}`}>
+                  <UploadProgress progress={overallProgress} fileName={currentName} fileNumber={currentNumber} fileCount={sending.length} merging={merging} />
+                </div>
               </div>
 
               {/* Footer Bar */}
               <Image src="/upload/hairline.svg" alt="" width={582} height={1} className="h-px w-[582px] max-w-none" />
               <div className="flex h-[89px] items-start justify-between pt-3.5">
-                <div className="flex items-baseline gap-1 pt-1.5 text-[#2C322F]">
-                  <span className="text-2xl leading-8">{files.length}</span>
-                  <span className="text-[13px] text-[#6F7468]">個檔案 · {formatSize(totalSize)}</span>
-                </div>
+                {uploading ? (
+                  <div className="pt-1.5 text-[13px] leading-8 tabular-nums text-[#6F7468]">
+                    <span className="text-[#2C322F]">{formatSize(sentSize)} / {formatSize(sendingSize)}</span>
+                    {speed > 0 && <>{' '}· {formatSize(speed)}/s · 剩約 {formatSeconds(etaSeconds)}</>}
+                  </div>
+                ) : (
+                  <div className="flex items-baseline gap-1 pt-1.5 text-[#2C322F]">
+                    <span className="text-2xl leading-8">{files.length}</span>
+                    <span className="text-[13px] text-[#6F7468]">個檔案 · {formatSize(totalSize)}</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={startUpload}
-                  disabled={!uploadAllowed || uploading || !files.some((f) => f.status === 'pending')}
+                  disabled={!uploadAllowed || uploading || !files.some(isUploadable)}
                   className="h-[42px] w-[134px] rounded-sm bg-[#62A4A7] text-[14.5px] text-white transition-all hover:bg-[#54999D] disabled:opacity-50"
                 >
                   {uploading ? '上傳中...' : '開始上傳 →'}
