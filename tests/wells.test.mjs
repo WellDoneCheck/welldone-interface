@@ -11,6 +11,7 @@ test('a well is named by its code, and keeps the backend id for its image', () =
   assert.equal(well.recordId, 'task-1');
   assert.equal(well.verdict, 'well');
   assert.equal(wellImageUrl(well, 640), '/wells/7/image?size=640');
+  assert.equal(wellImageUrl(well, 1600, 100), '/wells/7/image?size=1600&radius=100');
 });
 
 test('a well shows where it is and when its map came in (Taipei time)', () => {

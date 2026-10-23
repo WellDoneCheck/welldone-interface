@@ -55,5 +55,7 @@ export async function fetchWells(task: Pick<Task, 'id' | 'created_at'>): Promise
   return wells.map((well) => toMapWell(well, task));
 }
 
-// The well's aerial photo, cut from its map around it (a PNG, size px square)
-export const wellImageUrl = (well: Pick<MapWell, 'wellId'>, size: number) => `/wells/${well.wellId}/image?size=${size}`;
+// The well's aerial photo, cut from its map around it (a PNG, size px square), radius metres each way (the backend's
+// 15 when not given)
+export const wellImageUrl = (well: Pick<MapWell, 'wellId'>, size: number, radius?: number) =>
+  `/wells/${well.wellId}/image?size=${size}${radius ? `&radius=${radius}` : ''}`;

@@ -13,7 +13,8 @@ import { useWellVerdicts } from './useWellVerdicts';
 import { canVerify, saveVerdict, verdictOf } from '../utils/wellVerdicts';
 import { rememberVisit } from '../utils/lastVisit';
 import type { CheckView } from '../utils/routeRecords';
-import type { MapWell, Verdict } from '../utils/wells';
+import { fileUrl } from '../utils/api';
+import { wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
 
 // The info column (560 wide: a 72px well id like SW-2023-A005 needs ~530) and the compare panel (film strip + square
 // image, 972 wide and 702 tall) with at least 60px between them, scaled to fit the content area lined up with the navbar
@@ -32,11 +33,28 @@ const VERDICTS: { verdict: Verdict; label: string; color: string }[] = [
 
 /* ─── Background ────────────────────────────────────────────────── */
 
-function Background() {
+// The well's surroundings from its own map: this many metres each way around it, at this many px (enough to cover the
+// page once darkened and softened)
+const BACKGROUND_RADIUS = 100;
+const BACKGROUND_SIZE = 1600;
+
+// The well's surroundings, faded in over the stock aerial photo once read (the photo stays where there are none)
+function Background({ well }: { well: MapWell }) {
+  const [loaded, setLoaded] = useState(false);
   return (
     <PageBackgroundTransition>
       <div className="absolute inset-0">
         <Image src="/aerial-tile.webp" unoptimized alt="" fill priority sizes="100vw" className="object-cover" />
+        {/* the ink under it shows where its map has no imagery (a well near the map's edge) */}
+        <div className={`absolute inset-0 overflow-hidden bg-[#2C322F] transition-opacity duration-700 ease-out ${loaded ? 'opacity-100' : 'opacity-0'}`}>
+          {/* eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address */}
+          <img
+            src={fileUrl(wellImageUrl(well, BACKGROUND_SIZE, BACKGROUND_RADIUS))}
+            alt=""
+            className="h-full w-full scale-105 object-cover blur-[2px]"
+            onLoad={() => setLoaded(true)}
+          />
+        </div>
         <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,3,3,0.4)_0%,rgba(35,35,35,0.28)_47%,rgba(255,255,255,0)_100%)]" />
         <div className="absolute inset-0 opacity-40 [background:radial-gradient(ellipse_1707px_960px_at_50%_50%,rgba(99,83,54,0)_6%,rgba(150,126,82,0.5)_38%,rgb(201,169,110)_70%)]" />
       </div>
@@ -152,7 +170,7 @@ export default function CheckPage({ view }: { view: CheckView }) {
 
   return (
     <div className="relative h-screen overflow-hidden bg-[#2C322F]" style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
-      <Background />
+      <Background well={record} />
 
       {/* beside it, the map file the well was found in */}
       <BackToMapLink href={backHref} transitionTypes={TO_MAP} mapFile={task} top={BACK_LINK_TOP} />
