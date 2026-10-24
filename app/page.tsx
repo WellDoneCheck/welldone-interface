@@ -48,8 +48,9 @@ export default function Home() {
       <div className="min-h-screen bg-black text-white">
         {/* ===== Image-sequence scroll hero ===== */}
         <ScrollImageSequence
-          totalFrames={229}
-          framePattern="/landing_page/map_frames/frame_{index}.jpg"
+          totalFrames={496}
+          framePattern="/landing_page/map_frames/frame_{index}.webp"
+          lightFramePattern="/landing_page/map_frames_light/frame_{index}.webp"
           scrollHeight={400}
           shrinkHeight={350}
           onAnimatingChange={setHeroAnimating}
