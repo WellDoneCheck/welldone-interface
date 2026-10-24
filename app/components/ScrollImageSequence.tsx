@@ -25,10 +25,6 @@ const SHRINK_END_SCALE = 0.515;
 // The last frame without its pin, and the pin on its own; they stand in for the frames from STILL_FROM_FRAME
 const STILL_IMAGE = '/landing_page/hero-still.webp';
 const PIN_IMAGE = '/landing_page/pin.webp';
-// Scrolling holds still this long once the map has finished shrinking (going down),
-// then glides on into the photo wall by itself over SHRINK_EXIT_MS
-const SHRINK_DWELL_MS = 1000;
-const SHRINK_EXIT_MS = 1600;
 // scrollY can be fractional (display scaling, browser zoom), so positions are compared with this slack
 const SCROLL_TOLERANCE_PX = 2;
 const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ']);
@@ -348,96 +344,6 @@ export default function ScrollImageSequence({
       window.removeEventListener('keydown', blockKeys);
     };
   }, [shrinkHeight, applyPinFold, setPinFolded]);
-
-  // Dwell: once the shrink is complete (scrolling down), scrolling is held for SHRINK_DWELL_MS,
-  // then the page glides down into the photo wall unless the user takes over
-  useEffect(() => {
-    let lockedUntil = 0;
-    let lockY = 0;
-    let dwelled = false;
-    let lastY = window.scrollY;
-    let dwellTimer: ReturnType<typeof setTimeout> | undefined;
-    let glideFrame = 0;
-    let gliding = false;
-
-    const isLocked = () => performance.now() < lockedUntil;
-
-    const glideIntoNextSection = () => {
-      const next = containerRef.current?.nextElementSibling as HTMLElement | null;
-      if (!next || Math.abs(window.scrollY - lockY) > SCROLL_TOLERANCE_PX) return;
-      gliding = true;
-      const from = window.scrollY;
-      const to = next.offsetTop;
-      const startedAt = performance.now();
-      const step = (now: number) => {
-        const progress = Math.min((now - startedAt) / SHRINK_EXIT_MS, 1);
-        window.scrollTo(0, from + (to - from) * easeInOutSine(progress));
-        if (progress < 1) glideFrame = requestAnimationFrame(step);
-        else gliding = false;
-      };
-      glideFrame = requestAnimationFrame(step);
-    };
-
-    // The user scrolling takes over from the automatic glide
-    const takeOver = () => {
-      if (isLocked()) return;
-      cancelAnimationFrame(glideFrame);
-      gliding = false;
-    };
-
-    const onScroll = () => {
-      const container = containerRef.current;
-      if (!container || shrinkHeight <= 0) return;
-      const y = window.scrollY;
-
-      if (isLocked()) {
-        if (Math.abs(y - lockY) > SCROLL_TOLERANCE_PX) window.scrollTo(0, lockY);
-        return;
-      }
-
-      const shrinkPx = (shrinkHeight / 100) * window.innerHeight;
-      const shrinkEnd = container.offsetTop + container.offsetHeight - window.innerHeight;
-      if (y < shrinkEnd - shrinkPx * 0.05) dwelled = false; // scrolled back up: hold again next time
-      const arrivedGoingDown = y > lastY && y >= shrinkEnd;
-      lastY = y;
-
-      if (!dwelled && arrivedGoingDown) {
-        dwelled = true;
-        lockY = shrinkEnd;
-        lockedUntil = performance.now() + SHRINK_DWELL_MS;
-        window.scrollTo(0, lockY);
-        lastY = lockY;
-        dwellTimer = setTimeout(glideIntoNextSection, SHRINK_DWELL_MS);
-      }
-    };
-
-    // Scrolling down while it glides down (e.g. leftover wheel momentum) just rides along; any other input takes over
-    const block = (event: Event) => {
-      const alongGlide = gliding && event instanceof WheelEvent && event.deltaY > 0;
-      if (isLocked() || alongGlide) event.preventDefault();
-      else takeOver();
-    };
-    const blockKeys = (event: KeyboardEvent) => {
-      if (!SCROLL_KEYS.has(event.key)) return;
-      if (isLocked()) event.preventDefault();
-      else takeOver();
-    };
-
-    window.addEventListener('scroll', onScroll, { passive: true });
-    window.addEventListener('wheel', block, { passive: false });
-    window.addEventListener('touchstart', takeOver, { passive: true });
-    window.addEventListener('touchmove', block, { passive: false });
-    window.addEventListener('keydown', blockKeys);
-    return () => {
-      clearTimeout(dwellTimer);
-      cancelAnimationFrame(glideFrame);
-      window.removeEventListener('scroll', onScroll);
-      window.removeEventListener('wheel', block);
-      window.removeEventListener('touchstart', takeOver);
-      window.removeEventListener('touchmove', block);
-      window.removeEventListener('keydown', blockKeys);
-    };
-  }, [shrinkHeight]);
 
   // Cancel animation on user interaction (wheel / touch)
   useEffect(() => {
