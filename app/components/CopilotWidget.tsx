@@ -1,10 +1,13 @@
 'use client';
 
-import { useEffect, useRef, useState, type KeyboardEvent, type FormEvent } from 'react';
+import { Suspense, useEffect, useRef, useState, type KeyboardEvent, type FormEvent } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { useCopilotChat } from './useCopilotChat';
 import { useFitScale, type FitStage } from './useFitScale';
-import { COPILOT_NAME, COPILOT_STATUS, COPILOT_SUGGESTIONS, type CopilotMessage } from '../data/copilot';
+import { COPILOT_NAME, COPILOT_STATUS, COPILOT_SUGGESTIONS, type CopilotAction, type CopilotMessage } from '../data/copilot';
+import { actionsForPage, fetchSuggestions, splitDetail } from '../utils/copilot';
 
 // Laid out for the 1920×1080 Figma frame and scaled to the viewport
 const STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY: 0, minViewportWidth: 0 };
@@ -48,15 +51,15 @@ function ChatHeader() {
 
 /* ─── Messages ──────────────────────────────────────────────────── */
 
-// "座標: 23.84, 120.51" is shown as a label/value pair; anything else as plain text
+// "座標：23.84, 120.51" is shown as a label/value pair; anything else as plain text
 function DetailItem({ detail }: { detail: string }) {
-  const [label, value] = detail.split(/:\s(.*)/);
+  const pair = splitDetail(detail);
   return (
     <li className="flex gap-3 border-b border-[#E5E2D9] py-2 last:border-b-0">
-      {value ? (
+      {pair ? (
         <>
-          <span className="w-24 shrink-0 text-[var(--ink-soft)]">{label}</span>
-          <span className="font-medium text-[var(--ink)]">{value}</span>
+          <span className="w-24 shrink-0 text-[var(--ink-soft)]">{pair.label}</span>
+          <span className="font-medium text-[var(--ink)]">{pair.value}</span>
         </>
       ) : (
         <span className="text-[var(--brand-ink)]">{detail}</span>
@@ -65,13 +68,41 @@ function DetailItem({ detail }: { detail: string }) {
   );
 }
 
-function AssistantMessage({ message }: { message: CopilotMessage }) {
+// Buttons under an answer, to the page it is about (fitted to the page open: actionsForPage); going there retracts the
+// drawer
+function ActionLinks({ actions, onNavigate }: { actions: CopilotAction[]; onNavigate: () => void }) {
+  const shown = actionsForPage(actions, usePathname(), useSearchParams().get('record'));
+  if (!shown.length) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {shown.map((action) => (
+        <Link
+          key={action.to}
+          href={action.to}
+          onClick={onNavigate}
+          className={`rounded-full bg-[image:var(--gradient-primary)] px-3.5 py-1.5 text-sm text-white shadow-[var(--shadow-card)] transition-transform duration-300 ${MOTION} hover:-translate-y-0.5 active:translate-y-0`}
+        >
+          {action.label}
+        </Link>
+      ))}
+    </div>
+  );
+}
+
+interface ReplyHandlers {
+  onPick: (text: string) => void;
+  onNavigate: () => void;
+  disabled: boolean;
+}
+
+function AssistantMessage({ message, onPick, onNavigate, disabled }: { message: CopilotMessage } & ReplyHandlers) {
   return (
     <div className={`flex gap-3 ${MESSAGE_ENTER}`}>
       <CopilotAvatar size="sm" />
       <div className="flex max-w-[440px] flex-col gap-1.5">
         <p className="text-[13px] text-[var(--ink-soft)]">
-          {COPILOT_NAME} · {message.time}
+          {COPILOT_NAME}
+          {message.time && ` · ${message.time}`}
         </p>
         <div className="flex flex-col gap-3 rounded-2xl rounded-tl-md border border-[#E5E2D9] bg-white px-4 py-3 shadow-[var(--shadow-card)]">
           <p className="text-[15px] leading-[1.6] text-[var(--ink)]">{message.text}</p>
@@ -82,6 +113,13 @@ function AssistantMessage({ message }: { message: CopilotMessage }) {
               ))}
             </ul>
           )}
+          {message.actions?.length ? (
+            // the page's search params: kept out of the pages' own Suspense boundary, so given one of its own
+            <Suspense fallback={null}>
+              <ActionLinks actions={message.actions} onNavigate={onNavigate} />
+            </Suspense>
+          ) : null}
+          {message.suggestions?.length ? <Suggestions items={message.suggestions} onPick={onPick} disabled={disabled} /> : null}
         </div>
       </div>
     </div>
@@ -120,7 +158,13 @@ function TypingIndicator() {
   );
 }
 
-function MessageThread({ messages, typing, active }: { messages: CopilotMessage[]; typing: boolean; active: boolean }) {
+function MessageThread({
+  messages,
+  typing,
+  active,
+  onPick,
+  onNavigate,
+}: { messages: CopilotMessage[]; typing: boolean; active: boolean } & Omit<ReplyHandlers, 'disabled'>) {
   const threadRef = useRef<HTMLDivElement>(null);
 
   // Keep the latest message in view
@@ -139,7 +183,11 @@ function MessageThread({ messages, typing, active }: { messages: CopilotMessage[
         今天
       </p>
       {messages.map((message) =>
-        message.role === 'user' ? <UserMessage key={message.id} message={message} /> : <AssistantMessage key={message.id} message={message} />,
+        message.role === 'user' ? (
+          <UserMessage key={message.id} message={message} />
+        ) : (
+          <AssistantMessage key={message.id} message={message} onPick={onPick} onNavigate={onNavigate} disabled={typing} />
+        ),
       )}
       {typing && <TypingIndicator />}
     </div>
@@ -148,10 +196,10 @@ function MessageThread({ messages, typing, active }: { messages: CopilotMessage[
 
 /* ─── Composer ──────────────────────────────────────────────────── */
 
-function Suggestions({ onPick, disabled }: { onPick: (text: string) => void; disabled: boolean }) {
+function Suggestions({ items, onPick, disabled }: { items: string[]; onPick: (text: string) => void; disabled: boolean }) {
   return (
     <div className="flex flex-wrap gap-2">
-      {COPILOT_SUGGESTIONS.map((suggestion) => (
+      {items.map((suggestion) => (
         <button
           key={suggestion}
           type="button"
@@ -166,7 +214,27 @@ function Suggestions({ onPick, disabled }: { onPick: (text: string) => void; dis
   );
 }
 
-function Composer({ onSend, disabled, inputRef }: { onSend: (text: string) => void; disabled: boolean; inputRef: React.RefObject<HTMLInputElement | null> }) {
+// The quick questions for the page the user is on, asked of the backend each time the drawer opens
+function PageSuggestions({ active, onPick, disabled }: { active: boolean; onPick: (text: string) => void; disabled: boolean }) {
+  const pathname = usePathname();
+  const record = useSearchParams().get('record');
+  const [items, setItems] = useState(COPILOT_SUGGESTIONS);
+
+  useEffect(() => {
+    if (!active) return;
+    let current = true;
+    fetchSuggestions(pathname, record).then((suggestions) => {
+      if (current) setItems(suggestions);
+    });
+    return () => {
+      current = false;
+    };
+  }, [active, pathname, record]);
+
+  return <Suggestions items={items} onPick={onPick} disabled={disabled} />;
+}
+
+function Composer({ active, onSend, disabled, inputRef }: { active: boolean; onSend: (text: string) => void; disabled: boolean; inputRef: React.RefObject<HTMLInputElement | null> }) {
   const [draft, setDraft] = useState('');
   const canSend = draft.trim().length > 0 && !disabled;
 
@@ -179,7 +247,10 @@ function Composer({ onSend, disabled, inputRef }: { onSend: (text: string) => vo
 
   return (
     <div className="flex shrink-0 flex-col gap-3 border-t border-[#E5E2D9] bg-[var(--bg-sunlit)] px-7 pb-7 pt-4">
-      <Suggestions onPick={onSend} disabled={disabled} />
+      {/* the page's search params: kept out of the pages' own Suspense boundary, so given one of its own */}
+      <Suspense fallback={<Suggestions items={COPILOT_SUGGESTIONS} onPick={onSend} disabled={disabled} />}>
+        <PageSuggestions active={active} onPick={onSend} disabled={disabled} />
+      </Suspense>
       <form
         onSubmit={submit}
         className="flex h-14 items-center gap-2 rounded-2xl border border-[#E5E2D9] bg-white pl-4 pr-2 shadow-[var(--shadow-card)] transition-shadow duration-300 focus-within:shadow-[var(--shadow-focus)]"
@@ -299,8 +370,8 @@ export default function CopilotWidget() {
           style={{ width: DRAWER_WIDTH, height: `calc(100dvh / ${scale})` }}
         >
           <ChatHeader />
-          <MessageThread messages={messages} typing={typing} active={isOpen} />
-          <Composer onSend={send} disabled={typing} inputRef={inputRef} />
+          <MessageThread messages={messages} typing={typing} active={isOpen} onPick={send} onNavigate={() => setIsOpen(false)} />
+          <Composer active={isOpen} onSend={send} disabled={typing} inputRef={inputRef} />
         </section>
       </div>
     </div>

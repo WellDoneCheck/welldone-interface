@@ -37,6 +37,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 | 導覽列「上次造訪」 | `GET /me/last-visits`、`PUT /me/last-visits/:page` | `lastVisit.ts` |
 | 監控總覽 | `GET /monitor/stats`（數字、準確率、30 天趨勢）；辨識任務是 `GET /tasks` 與進度（同影像匯入，改名 `PATCH /tasks/:id/name`）；地圖面板是最新完成地圖的水井與影像 | `monitorStats.ts`、`useMonitorStats`、`monitorLive.ts` 的 `liveTask`、`MonitorPage` |
 | 首頁準確率與水井數 | `GET /monitor/stats`（讀一次） | `FloatingGrid` |
+| AI 助理 Skyhi | `POST /copilot/ask`：後端從題庫找最相似的題目回答（不接 LLM），或查水井編號、經緯度、年份與地區；回答下方的按鈕連到站內頁面（點了收起助理；「前往匯出頁」「前往合法井比對」這類沒指定地圖的按鈕只在地圖、匯出、比對頁顯示，帶上目前的 `?record=`；已經在那一頁的按鈕不顯示，見 `actionsForPage`），沒把握時給建議題目（點了就送出）；呼叫失敗時把錯誤寫在回覆裡。輸入框上方的常見問題每次打開助理時向 `GET /copilot/suggestions` 要（帶目前路徑，地圖頁另帶 `?record=`），後端依頁面挑題型並帶入地圖所在的鄉鎮、年份；拿到前或連不上時顯示固定的三題。規格見 well-back `docs/COPILOT.md` | `utils/copilot.ts`、`useCopilotChat`、`CopilotWidget` |
 
 權限照後端四種角色（root / admin / operator / viewer）：檢視者看不到上傳、改名、驗證、刪除；
 operator 只能刪自己上傳的地圖；只有 root 能建帳號。

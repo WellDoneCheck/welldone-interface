@@ -1,4 +1,11 @@
-// Skyhi (AI copilot) conversation data. Fake until the assistant is connected.
+// Skyhi (AI copilot): its name, the quick questions and the greeting. The answers come from the backend
+// (utils/copilot.ts).
+
+// A button under an answer, to a page of the site (e.g. the map with a well selected)
+export interface CopilotAction {
+  label: string;
+  to: string;
+}
 
 export interface CopilotMessage {
   id: string;
@@ -6,52 +13,35 @@ export interface CopilotMessage {
   text: string;
   // Bullet points shown under an assistant answer
   details?: string[];
+  actions?: CopilotAction[];
+  // Questions offered when the assistant is not sure what was asked; picking one asks it
+  suggestions?: string[];
   // 'HH:mm'
   time: string;
 }
 
+export type CopilotReply = Pick<CopilotMessage, 'text' | 'details' | 'actions' | 'suggestions'>;
+
 export const COPILOT_NAME = 'Skyhi';
 export const COPILOT_STATUS = 'AI 智能助理已上線';
 
-// Quick questions offered above the input, each matching a fake reply below
-export const COPILOT_SUGGESTIONS = ['水井辨識進度如何？', '如何匯出辨識結果？', '如何在地圖上查看位置？'];
+// Quick questions offered above the input until the backend's picks for the page arrive (utils/copilot.ts
+// fetchSuggestions), and when it cannot be reached; the backend's fixed ones are the same three
+export const COPILOT_SUGGESTIONS = ['水井辨識進度如何？', '如何匯出辨識結果？', '如何在地圖上查看水井位置？'];
 
-// The example conversation from the design
+// The greeting: what can be asked, as the backend's "你可以幫我做什麼？" answers it
 export const SEED_MESSAGES: CopilotMessage[] = [
   {
     id: 'seed-1',
-    role: 'user',
-    text: '請幫我查詢溪州段 412 地號的探測結果，是否有異常水井？',
-    time: '14:32',
-  },
-  {
-    id: 'seed-2',
     role: 'assistant',
-    text: '已為您檢索「溪州段 412 地號」探測結果。系統在該區域偵測到 1 處潛在未登記水井：',
-    details: ['座標: 23.8421, 120.5134', '信賴度: 94.2%', '影像辨識狀態: 待確認（琥珀標記）', '建議派遣巡查員前往現場核實。'],
-    time: '14:33',
+    text: `您好，我是 ${COPILOT_NAME}，可以幫您查詢系統資料，例如：`,
+    details: [
+      '找地圖：2026的雲林',
+      '地區統計：雲林有多少疑似未登記的井？',
+      '附近水井：23.8421, 120.5134 附近有沒有水井？',
+      '單口井：查詢 SW-2026-A001',
+      '操作說明：如何匯出辨識結果？',
+    ],
+    time: '',
   },
 ];
-
-const REPLIES: { keywords: string[]; text: string; details?: string[] }[] = [
-  {
-    keywords: ['水井', '井'],
-    text: '目前資料庫中共有 12 筆匯入的空拍影像紀錄，其中：',
-    details: ['已完成辨識: 4 筆', '正在辨識中: 4 筆', '正在切圖中: 4 筆'],
-  },
-  {
-    keywords: ['匯出', '下載'],
-    text: '匯出功能可以將辨識結果輸出成常見的地理資訊格式，需要我帶您前往匯出頁面嗎？',
-  },
-  {
-    keywords: ['地圖', '位置', '座標'],
-    text: '您可以在「地圖檢視」頁面查看水井位置，點選地圖上的圖釘就能看到該口井的影像與座標。',
-  },
-];
-
-const FALLBACK_REPLY = { text: '已收到您的訊息。這是示範回覆，正式版將由 AI 助理根據系統資料回答。' };
-
-// Fake answer picked by keyword
-export function replyTo(question: string): Pick<CopilotMessage, 'text' | 'details'> {
-  return REPLIES.find((reply) => reply.keywords.some((keyword) => question.includes(keyword))) ?? FALLBACK_REPLY;
-}
