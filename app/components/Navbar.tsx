@@ -127,7 +127,7 @@ export default function Navbar({
         {/* Logo */}
         <button type="button" onClick={handleLogoClick} className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity bg-transparent border-0 p-0">
           {/* taller than the word: centred on it, sticking out above and below without making the navbar taller */}
-          <Image src="/logo.webp" alt="" width={47} height={56} unoptimized priority className="-my-2 h-[56px] w-auto" />
+          <Image src="/logo.webp" alt="" width={143} height={168} unoptimized priority className="-my-2 h-[56px] w-auto" />
           <span
             className={`text-4xl font-bold tracking-wide transition-colors duration-500 ${style.textColor}`}
             style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}

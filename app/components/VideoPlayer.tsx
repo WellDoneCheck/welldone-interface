@@ -33,6 +33,22 @@ function PauseIcon({ className }: { className: string }) {
   );
 }
 
+function FullscreenIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" />
+    </svg>
+  );
+}
+
+function ExitFullscreenIcon({ className }: { className: string }) {
+  return (
+    <svg className={className} fill="currentColor" viewBox="0 0 24 24" aria-hidden>
+      <path d="M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z" />
+    </svg>
+  );
+}
+
 export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -40,6 +56,7 @@ export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(NaN);
   const [showControls, setShowControls] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const progress = Number.isFinite(duration) && duration > 0 ? (currentTime / duration) * 100 : 0;
@@ -97,6 +114,13 @@ export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
     };
   }, []);
 
+  // Follow fullscreen however it is left (the button, Esc, the browser's own controls)
+  useEffect(() => {
+    const syncFullscreen = () => setFullscreen(document.fullscreenElement === containerRef.current);
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen);
+  }, []);
+
   // Auto-hide controls while playing
   const revealControls = useCallback(() => {
     setShowControls(true);
@@ -113,6 +137,16 @@ export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
     if (!video) return;
     if (video.paused) video.play();
     else video.pause();
+  }, []);
+
+  // The whole player goes fullscreen so its own controls come along; iPhone can't do that for an element,
+  // so there the video uses the system player's fullscreen instead
+  const toggleFullscreen = useCallback(() => {
+    const container = containerRef.current;
+    const video = videoRef.current as (HTMLVideoElement & { webkitEnterFullscreen?: () => void }) | null;
+    if (document.fullscreenElement) document.exitFullscreen();
+    else if (container?.requestFullscreen) container.requestFullscreen();
+    else video?.webkitEnterFullscreen?.();
   }, []);
 
   const seekTo = useCallback((seconds: number) => {
@@ -143,7 +177,7 @@ export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
       <video
         ref={videoRef}
         src={src}
-        className="h-full w-full object-cover"
+        className={`h-full w-full ${fullscreen ? 'object-contain' : 'object-cover'}`}
         preload="metadata"
         loop
         muted
@@ -212,6 +246,15 @@ export default function VideoPlayer({ src, className = '' }: VideoPlayerProps) {
             />
           </div>
         </div>
+
+        <button
+          type="button"
+          aria-label={fullscreen ? '離開全螢幕' : '全螢幕'}
+          onClick={toggleFullscreen}
+          className="flex h-9 w-9 shrink-0 items-center justify-center text-[#F7F6F1]/80 transition-colors duration-200 hover:text-white focus-visible:shadow-[var(--shadow-focus)] focus-visible:outline-none"
+        >
+          {fullscreen ? <ExitFullscreenIcon className="h-6 w-6" /> : <FullscreenIcon className="h-6 w-6" />}
+        </button>
       </div>
     </div>
   );

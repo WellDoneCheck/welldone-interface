@@ -9,6 +9,7 @@ import SiteFooter from './components/SiteFooter';
 import StartButton from './components/StartButton';
 import { PageTransition } from './components/SharedTransition';
 import { useFitScale, type FitStage } from './components/useFitScale';
+import { shouldAlignSection } from './utils/sectionAlign';
 
 // The hero's first screen is the 1920×1080 Figma frame, scaled to fit the window; the start button (371×108) sits
 // this far from its left and bottom edges
@@ -21,23 +22,30 @@ export default function Home() {
   // the whole window, scrollbar included, as the hero covers it
   const heroScale = useFitScale(HERO_STAGE, true);
 
-  // Auto-align the video section to the viewport top when scrolling stops near it
+  // Auto-align the video section to the viewport top when scrolling down stops near it
   // Skip during hero animation to prevent fighting with auto-scroll
   useEffect(() => {
+    let lastY = window.scrollY;
+    let scrollingDown = false;
+    const onScroll = () => {
+      if (window.scrollY !== lastY) scrollingDown = window.scrollY > lastY;
+      lastY = window.scrollY;
+    };
     const onScrollEnd = () => {
       if (heroAnimating) return;
       const section = videoSectionRef.current;
       if (!section) return;
-      const rect = section.getBoundingClientRect();
-      const vh = window.innerHeight;
-      const topInView = rect.top >= 0 && rect.top <= vh * 0.4;
-      const bottomInView = rect.top < 0 && rect.bottom >= vh * 0.6;
-      if (Math.abs(rect.top) > 2 && (topInView || bottomInView)) {
-        window.scrollTo({ top: window.scrollY + rect.top, behavior: 'smooth' });
+      const { top } = section.getBoundingClientRect();
+      if (shouldAlignSection(top, window.innerHeight, scrollingDown)) {
+        window.scrollTo({ top: window.scrollY + top, behavior: 'smooth' });
       }
     };
+    window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('scrollend', onScrollEnd);
-    return () => window.removeEventListener('scrollend', onScrollEnd);
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scrollend', onScrollEnd);
+    };
   }, [heroAnimating]);
 
   // Don't leave the shared navbar hidden if we navigate away mid-animation
@@ -48,8 +56,9 @@ export default function Home() {
       <div className="min-h-screen bg-black text-white">
         {/* ===== Image-sequence scroll hero ===== */}
         <ScrollImageSequence
-          totalFrames={229}
-          framePattern="/landing_page/map_frames/frame_{index}.jpg"
+          totalFrames={496}
+          framePattern="/landing_page/map_frames/frame_{index}.webp"
+          lightFramePattern="/landing_page/map_frames_light/frame_{index}.webp"
           scrollHeight={400}
           shrinkHeight={350}
           onAnimatingChange={setHeroAnimating}

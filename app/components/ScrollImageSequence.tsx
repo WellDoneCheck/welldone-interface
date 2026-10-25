@@ -2,10 +2,14 @@
 
 import { useRef, useEffect, useState, useCallback, type ReactNode } from 'react';
 import WellLoader from './WellLoader';
+import { isSharpFrameKept } from '../utils/sharpFrameWindow';
+import { PIN_FOLD_MS, PIN_TIP, PIN_WIDTH, STILL_FROM_FRAME, STILL_START_SCALE, pinFold, stillScale } from '../utils/heroStill';
 
 interface ScrollImageSequenceProps {
   totalFrames: number;
   framePattern: string;
+  // Same frames at a lower resolution: all of them load up front and stand in until the sharp frame is ready
+  lightFramePattern: string;
   // Scroll distance (vh) that plays the frames
   scrollHeight?: number;
   // Extra scroll distance (vh) after the last frame that shrinks the map into a centered frame
@@ -18,13 +22,9 @@ interface ScrollImageSequenceProps {
 
 // The map ends up at this fraction of the viewport, centered on a beige background
 const SHRINK_END_SCALE = 0.515;
-// Wide aerial photo the last frame cross-fades into while shrinking (loaded near the end of the frames)
-const SHRINK_IMAGE = '/aerial-bg.webp';
-const SHRINK_IMAGE_PRELOAD_PROGRESS = 0.8;
-// Scrolling holds still this long once the map has finished shrinking (going down),
-// then glides on into the photo wall by itself over SHRINK_EXIT_MS
-const SHRINK_DWELL_MS = 1000;
-const SHRINK_EXIT_MS = 1600;
+// The last frame without its pin, and the pin on its own; they stand in for the frames from STILL_FROM_FRAME
+const STILL_IMAGE = '/landing_page/hero-still.webp';
+const PIN_IMAGE = '/landing_page/pin.webp';
 // scrollY can be fractional (display scaling, browser zoom), so positions are compared with this slack
 const SCROLL_TOLERANCE_PX = 2;
 const SCROLL_KEYS = new Set(['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' ']);
@@ -34,6 +34,13 @@ const NAV_LIGHT_THRESHOLD = 0.25;
 // then fades out over the ready page
 const MIN_LOADING_MS = 900;
 const LOADER_FADE_MS = 450;
+// The arrow's auto-play pauses at this point of the footage (frame 125 of the original 229), whatever the frame count
+const AUTOPLAY_SPLIT_RATIO = 125 / 229;
+
+const whenLoaded = (img: HTMLImageElement, callback: () => void) => {
+  if (img.complete) callback();
+  else img.addEventListener('load', callback, { once: true });
+};
 
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 // Gentler than cubic (no steep middle): used for the scroll-driven shrink so it never feels rushed
@@ -42,6 +49,7 @@ const easeInOutSine = (t: number) => -(Math.cos(Math.PI * t) - 1) / 2;
 export default function ScrollImageSequence({
   totalFrames,
   framePattern,
+  lightFramePattern,
   scrollHeight = 400,
   shrinkHeight = 100,
   className,
@@ -57,6 +65,7 @@ export default function ScrollImageSequence({
   const pendingFrameRef = useRef<number>(-1);
   const frameCacheRef = useRef<Map<number, HTMLImageElement>>(new Map);
   const decodedFramesRef = useRef<Set<number>>(new Set());
+  const lightFrameCacheRef = useRef<Map<number, HTMLImageElement>>(new Map());
   const [framesReady, setFramesReady] = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
   const [timeProgress, setTimeProgress] = useState(0);
@@ -70,11 +79,18 @@ export default function ScrollImageSequence({
   const heroActionRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const scalerRef = useRef<HTMLDivElement>(null);
-  const shrinkImgRef = useRef<HTMLImageElement>(null);
+  const stillLayerRef = useRef<HTMLDivElement>(null);
+  const stillImgRef = useRef<HTMLImageElement>(null);
+  const pinRef = useRef<HTMLDivElement>(null);
+  const pinImgRef = useRef<HTMLImageElement>(null);
   const [arrowVisible, setArrowVisible] = useState(true);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const animatingRef = useRef(false);
   const scrollAnimRef = useRef<number>(0);
+  // Where the pin is in folding away (0 standing … 1 gone), where it is heading, and its running animation
+  const pinFoldRef = useRef(0);
+  const pinFoldTargetRef = useRef<0 | 1>(0);
+  const pinAnimRef = useRef<number>(0);
 
   const getUrl = useCallback(
     (pattern: string, index: number) => {
@@ -97,16 +113,15 @@ export default function ScrollImageSequence({
     [getUrl, totalFrames],
   );
 
-  const applySrc = useCallback((index: number, img: HTMLImageElement) => {
+  const applySrc = useCallback((img: HTMLImageElement) => {
     if (imgRef.current && imgRef.current.src !== img.src) {
       imgRef.current.src = img.src;
       if (maskImgRef.current) maskImgRef.current.src = img.src;
     }
-    if (lastFrameRef.current === index) decodedFramesRef.current.add(index);
   }, []);
 
-  // Async off-main-thread decode; the DOM img picks the frame up from the
-  // shared decode cache, so a frame swap never blocks the main thread.
+  // Async off-main-thread decode; the sharp frame only goes on screen once decoded,
+  // so swapping it in (over its light stand-in) never blocks the main thread.
   const decodeFrame = useCallback(
     (frameIndex: number) => {
       if (decodedFramesRef.current.has(frameIndex)) return;
@@ -116,7 +131,7 @@ export default function ScrollImageSequence({
         .decode()
         .then(() => {
           decodedFramesRef.current.add(frameIndex);
-          if (pendingFrameRef.current === frameIndex) applySrc(frameIndex, cached);
+          if (pendingFrameRef.current === frameIndex) applySrc(cached);
         })
         .catch(() => {});
     },
@@ -128,44 +143,63 @@ export default function ScrollImageSequence({
       if (frameIndex === lastFrameRef.current) return;
       lastFrameRef.current = frameIndex;
       pendingFrameRef.current = frameIndex;
+      // from here the still photo covers the frames (see the scroll handler), so there is nothing to load
+      if (frameIndex >= STILL_FROM_FRAME) return;
 
-        const cached = frameCacheRef.current.get(frameIndex);
-        if (cached && cached.complete && cached.naturalWidth > 0) {
-        if (decodedFramesRef.current.has(frameIndex)) {
-          applySrc(frameIndex, cached);
-        } else {
-          decodeFrame(frameIndex);
-        }
-      } else if (cached) {
-        const onLoad = () => {
-          cached.removeEventListener('load', onLoad);
-          if (lastFrameRef.current === frameIndex) {
-            applySrc(frameIndex, cached);
-            decodeFrame(frameIndex);
-          }
-        };
-        if (cached.complete) onLoad();
-        else cached.addEventListener('load', onLoad);
-        } else {
-          const newImg = cacheImage(frameCacheRef.current, framePattern, frameIndex);
-          if (newImg) {
-            const onLoad = () => {
-              newImg.removeEventListener('load', onLoad);
-            if (lastFrameRef.current === frameIndex) {
-              applySrc(frameIndex, newImg);
-              decodeFrame(frameIndex);
-              }
-            };
-            if (newImg.complete) onLoad();
-            else newImg.addEventListener('load', onLoad);
-        }
+      const sharp = cacheImage(frameCacheRef.current, framePattern, frameIndex);
+      if (sharp && decodedFramesRef.current.has(frameIndex)) {
+        applySrc(sharp);
+      } else {
+        const light = lightFrameCacheRef.current.get(frameIndex);
+        if (light?.complete && light.naturalWidth > 0) applySrc(light);
+        if (sharp) whenLoaded(sharp, () => decodeFrame(frameIndex));
       }
 
       for (let i = 1; i <= 8; i++) cacheImage(frameCacheRef.current, framePattern, frameIndex + i);
       for (let i = 1; i <= 2; i++) cacheImage(frameCacheRef.current, framePattern, frameIndex - i);
-      for (let i = 0; i <= 4; i++) decodeFrame(frameIndex + i);
+      for (let i = 1; i <= 4; i++) {
+        const ahead = frameCacheRef.current.get(frameIndex + i);
+        if (ahead) whenLoaded(ahead, () => decodeFrame(frameIndex + i));
+      }
+
+      // Drop the sharp frames scrolled away from (removing src also lets one still downloading be cancelled)
+      for (const [index, img] of frameCacheRef.current) {
+        if (isSharpFrameKept(index, frameIndex)) continue;
+        img.removeAttribute('src');
+        frameCacheRef.current.delete(index);
+        decodedFramesRef.current.delete(index);
+      }
     },
     [cacheImage, decodeFrame, applySrc, framePattern],
+  );
+
+  const applyPinFold = useCallback((progress: number) => {
+    const pin = pinRef.current;
+    if (!pin) return;
+    const fold = pinFold(progress);
+    pin.style.transform = `translate(-50%, -100%) scale(${fold.scale})`;
+    pin.style.opacity = String(fold.opacity);
+  }, []);
+
+  // Folds the pin away (or stands it up again, playing the fold backwards from wherever it is), then calls onDone
+  const setPinFolded = useCallback(
+    (folded: boolean, onDone?: () => void) => {
+      const to = folded ? 1 : 0;
+      pinFoldTargetRef.current = to;
+      cancelAnimationFrame(pinAnimRef.current);
+      const from = pinFoldRef.current;
+      const duration = PIN_FOLD_MS * Math.abs(to - from);
+      const startedAt = performance.now();
+      const step = (now: number) => {
+        const t = duration > 0 ? Math.min(1, (now - startedAt) / duration) : 1;
+        pinFoldRef.current = from + (to - from) * t;
+        applyPinFold(pinFoldRef.current);
+        if (t < 1) pinAnimRef.current = requestAnimationFrame(step);
+        else onDone?.();
+      };
+      pinAnimRef.current = requestAnimationFrame(step);
+    },
+    [applyPinFold],
   );
 
   // Scroll handler
@@ -190,14 +224,6 @@ export default function ScrollImageSequence({
           const scale = 1 - (1 - SHRINK_END_SCALE) * easeInOutSine(shrinkProgress);
           if (scalerRef.current) scalerRef.current.style.transform = `scale(${scale})`;
 
-          // Cross-fade the last frame into the wide aerial photo while shrinking
-          const shrinkImg = shrinkImgRef.current;
-          if (shrinkImg) {
-            if (progress > SHRINK_IMAGE_PRELOAD_PROGRESS && !shrinkImg.getAttribute('src')) shrinkImg.src = SHRINK_IMAGE;
-            const fade = Math.max(0, Math.min(1, (shrinkProgress - 0.1) / 0.7));
-            shrinkImg.style.opacity = String(easeInOutSine(fade));
-          }
-
           // Let the navbar know the stage is light (beige) so it can use dark text
           const stage = stageRef.current;
           const navLight = String(shrinkProgress > NAV_LIGHT_THRESHOLD);
@@ -209,14 +235,22 @@ export default function ScrollImageSequence({
 
           showFrame(frame);
 
+          // Past STILL_FROM_FRAME the still photo and its pin stand in for the frames; the photo zooms with the
+          // fractional frame position, so it glides between frames and plays backwards when scrolling up
+          const stillLayer = stillLayerRef.current;
+          if (stillLayer) {
+            stillLayer.style.visibility = frame >= STILL_FROM_FRAME ? 'visible' : 'hidden';
+            stillLayer.style.transform = `translate(-50%, -50%) scale(${stillScale(progress * totalFrames, totalFrames)})`;
+          }
+
           // Fade out the first-frame gradient from frame 0 to frame 20
           const gradientOpacity = Math.max(0, 1 - progress / (20 / totalFrames));
           if (gradientRef.current) gradientRef.current.style.opacity = String(gradientOpacity);
           if (maskGradientRef.current) maskGradientRef.current.style.opacity = String(gradientOpacity);
 
-          // Hide arrow during the auto-play and once the frames are done: from there scrolling flows
-          // through the shrink straight into the photo wall
-          setArrowVisible(!animatingRef.current && frame < totalFrames - 1);
+          // Hide arrow during the auto-play and once the frames are done and the pin folded away: from there
+          // scrolling flows through the shrink straight into the photo wall
+          setArrowVisible(!animatingRef.current && (frame < totalFrames - 1 || pinFoldTargetRef.current === 0));
 
           // Handle text animation (the hero action moves with the title)
           for (const textEl of [textRef.current, heroActionRef.current]) {
@@ -253,95 +287,63 @@ export default function ScrollImageSequence({
   }, [totalFrames, showFrame, shrinkHeight]);
 
 
-  // Dwell: once the shrink is complete (scrolling down), scrolling is held for SHRINK_DWELL_MS,
-  // then the page glides down into the photo wall unless the user takes over
+  // Hold at the pin: while it stands, scrolling down stops at the end of the frames. Going on (wheel, keys, touch)
+  // folds the pin away while the page is held there, then lets it through; scrolling back up stands the pin up again
   useEffect(() => {
-    let lockedUntil = 0;
-    let lockY = 0;
-    let dwelled = false;
-    let lastY = window.scrollY;
-    let dwellTimer: ReturnType<typeof setTimeout> | undefined;
-    let glideFrame = 0;
-    let gliding = false;
+    let lockY = -1;
 
-    const isLocked = () => performance.now() < lockedUntil;
-
-    const glideIntoNextSection = () => {
-      const next = containerRef.current?.nextElementSibling as HTMLElement | null;
-      if (!next || Math.abs(window.scrollY - lockY) > SCROLL_TOLERANCE_PX) return;
-      gliding = true;
-      const from = window.scrollY;
-      const to = next.offsetTop;
-      const startedAt = performance.now();
-      const step = (now: number) => {
-        const progress = Math.min((now - startedAt) / SHRINK_EXIT_MS, 1);
-        window.scrollTo(0, from + (to - from) * easeInOutSine(progress));
-        if (progress < 1) glideFrame = requestAnimationFrame(step);
-        else gliding = false;
-      };
-      glideFrame = requestAnimationFrame(step);
+    const holdY = () => {
+      const container = containerRef.current;
+      if (!container) return Infinity;
+      const shrinkPx = (shrinkHeight / 100) * window.innerHeight;
+      return container.offsetTop + container.offsetHeight - window.innerHeight - shrinkPx;
     };
 
-    // The user scrolling takes over from the automatic glide
-    const takeOver = () => {
-      if (isLocked()) return;
-      cancelAnimationFrame(glideFrame);
-      gliding = false;
-    };
+    // Landing below the pin (e.g. a restored scroll position) starts with it already folded away
+    if (window.scrollY > holdY() + SCROLL_TOLERANCE_PX) {
+      pinFoldTargetRef.current = 1;
+      pinFoldRef.current = 1;
+      applyPinFold(1);
+    }
 
     const onScroll = () => {
-      const container = containerRef.current;
-      if (!container || shrinkHeight <= 0) return;
       const y = window.scrollY;
-
-      if (isLocked()) {
+      if (lockY >= 0) {
         if (Math.abs(y - lockY) > SCROLL_TOLERANCE_PX) window.scrollTo(0, lockY);
         return;
       }
-
-      const shrinkPx = (shrinkHeight / 100) * window.innerHeight;
-      const shrinkEnd = container.offsetTop + container.offsetHeight - window.innerHeight;
-      if (y < shrinkEnd - shrinkPx * 0.05) dwelled = false; // scrolled back up: hold again next time
-      const arrivedGoingDown = y > lastY && y >= shrinkEnd;
-      lastY = y;
-
-      if (!dwelled && arrivedGoingDown) {
-        dwelled = true;
-        lockY = shrinkEnd;
-        lockedUntil = performance.now() + SHRINK_DWELL_MS;
-        window.scrollTo(0, lockY);
-        lastY = lockY;
-        dwellTimer = setTimeout(glideIntoNextSection, SHRINK_DWELL_MS);
+      const hold = holdY();
+      if (pinFoldTargetRef.current === 0 && y > hold + SCROLL_TOLERANCE_PX) {
+        lockY = hold;
+        window.scrollTo(0, hold);
+        setArrowVisible(false);
+        setPinFolded(true, () => {
+          lockY = -1;
+        });
+      } else if (pinFoldTargetRef.current === 1 && y < hold - SCROLL_TOLERANCE_PX) {
+        setPinFolded(false);
       }
     };
 
-    // Scrolling down while it glides down (e.g. leftover wheel momentum) just rides along; any other input takes over
     const block = (event: Event) => {
-      const alongGlide = gliding && event instanceof WheelEvent && event.deltaY > 0;
-      if (isLocked() || alongGlide) event.preventDefault();
-      else takeOver();
+      if (lockY >= 0) event.preventDefault();
     };
     const blockKeys = (event: KeyboardEvent) => {
-      if (!SCROLL_KEYS.has(event.key)) return;
-      if (isLocked()) event.preventDefault();
-      else takeOver();
+      if (lockY >= 0 && SCROLL_KEYS.has(event.key)) event.preventDefault();
     };
 
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('wheel', block, { passive: false });
-    window.addEventListener('touchstart', takeOver, { passive: true });
     window.addEventListener('touchmove', block, { passive: false });
     window.addEventListener('keydown', blockKeys);
     return () => {
-      clearTimeout(dwellTimer);
-      cancelAnimationFrame(glideFrame);
+      cancelAnimationFrame(pinAnimRef.current);
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('wheel', block);
-      window.removeEventListener('touchstart', takeOver);
       window.removeEventListener('touchmove', block);
       window.removeEventListener('keydown', blockKeys);
     };
-  }, [shrinkHeight]);
+  }, [shrinkHeight, applyPinFold, setPinFolded]);
 
   // Cancel animation on user interaction (wheel / touch)
   useEffect(() => {
@@ -384,23 +386,33 @@ export default function ScrollImageSequence({
     return () => clearTimeout(timer);
   }, [loading]);
 
-  // Preload first 20 frames
+  // Every light frame (up to the still photo) loads before the page starts, so whichever frame scrolling reaches
+  // always has something to show; the still photo and pin are decoded up front too, so they appear without a hitch
   useEffect(() => {
     let loaded = 0;
-    const preloadCount = Math.min(20, totalFrames);
+    const stillImages = [stillImgRef.current, pinImgRef.current];
+    const total = STILL_FROM_FRAME + stillImages.length;
 
-    for (let i = 0; i < preloadCount; i++) {
-      const frameImg = cacheImage(frameCacheRef.current, framePattern, i);
+    const check = () => {
+      loaded++;
+      setLoadProgress(Math.round((loaded / total) * 100));
+      if (loaded >= total) {
+        setFramesReady(true);
+        // show the current frame again, now that its light stand-in is here
+        const shown = Math.max(0, lastFrameRef.current);
+        lastFrameRef.current = -1;
+        showFrame(shown);
+      }
+    };
+
+    for (const img of stillImages) {
+      if (img) img.decode().then(check, check);
+      else check();
+    }
+
+    for (let i = 0; i < STILL_FROM_FRAME; i++) {
+      const frameImg = cacheImage(lightFrameCacheRef.current, lightFramePattern, i);
       if (!frameImg) continue;
-
-      const check = () => {
-        loaded++;
-        setLoadProgress(Math.round((loaded / preloadCount) * 100));
-        if (loaded >= preloadCount) {
-          setFramesReady(true);
-          showFrame(0);
-        }
-      };
 
       if (frameImg.complete) check();
       else {
@@ -408,15 +420,7 @@ export default function ScrollImageSequence({
         frameImg.onerror = check;
       }
     }
-
-    const fallback = setTimeout(() => {
-      setFramesReady(true);
-      setLoadProgress(100);
-      showFrame(0);
-    }, 3000);
-
-    return () => clearTimeout(fallback);
-  }, [totalFrames, cacheImage, framePattern, showFrame]);
+  }, [cacheImage, lightFramePattern, showFrame]);
 
   return (
     <div
@@ -508,20 +512,55 @@ export default function ScrollImageSequence({
         </div>
 
 
+        {/* Layer 3.2: from STILL_FROM_FRAME, the still photo with its pin covers the frames. The 16:9 box covers the
+            stage the way the frames do, so the pin, placed in fractions of the photo, stands on the same spot */}
+        <div className="pointer-events-none absolute inset-0 z-[12] overflow-hidden">
+          <div
+            ref={stillLayerRef}
+            className="absolute left-1/2 top-1/2 aspect-video will-change-transform"
+            style={{
+              width: 'max(100%, 100vh * 16 / 9)',
+              visibility: 'hidden',
+              transform: `translate(-50%, -50%) scale(${STILL_START_SCALE})`,
+            }}
+          >
+            <img
+              ref={stillImgRef}
+              src={STILL_IMAGE}
+              alt=""
+              draggable={false}
+              className="h-full w-full select-none object-cover"
+            />
+            {/* The wrapper stands on the pin's spot and takes the fold; the pin inside hovers above it */}
+            <div
+              ref={pinRef}
+              className="absolute will-change-transform"
+              style={{
+                left: `${PIN_TIP.x * 100}%`,
+                top: `${PIN_TIP.y * 100}%`,
+                width: `${PIN_WIDTH * 100}%`,
+                transformOrigin: '50% 100%',
+                transform: 'translate(-50%, -100%)',
+              }}
+            >
+              <img
+                ref={pinImgRef}
+                src={PIN_IMAGE}
+                alt=""
+                draggable={false}
+                className="block w-full select-none"
+                style={{ animation: 'floatY 2.4s ease-in-out infinite' }}
+              />
+            </div>
+          </div>
+        </div>
+
         {/* Layer 3.5: hero action, above the masked video so nothing in the footage covers it */}
         {heroAction && (
           <div ref={heroActionRef} className="pointer-events-none absolute inset-0 z-[14] will-change-transform">
             {heroAction}
           </div>
         )}
-
-        {/* Layer 4: wide aerial photo, fades in while the map shrinks */}
-        <img
-          ref={shrinkImgRef}
-          alt=""
-          draggable={false}
-          className="pointer-events-none absolute inset-0 z-[13] h-full w-full select-none object-cover opacity-0"
-        />
         </div>
 
         {/* Loading overlay */}
@@ -551,23 +590,25 @@ export default function ScrollImageSequence({
               const scrollBottom = containerTop + totalScroll;
               const startY = window.scrollY;
 
-              const splitRatio = 125 / totalFrames;
               const totalDistance = scrollBottom - containerTop;
               const currentFrame = totalDistance > 0
                 ? Math.floor(((startY - containerTop) / totalDistance) * totalFrames)
                 : 0;
 
-              // If already at/near bottom, scroll to next section
+              // If already at/near bottom, fold the pin away (if still up), then scroll to next section
               if (currentFrame >= totalFrames - 1 || startY >= scrollBottom - 10) {
-                const nextSection = container.nextElementSibling as HTMLElement;
-                if (nextSection) {
-                  window.scrollTo({ top: nextSection.offsetTop, behavior: 'smooth' });
-                }
+                setArrowVisible(false);
+                setPinFolded(true, () => {
+                  const nextSection = container.nextElementSibling as HTMLElement;
+                  if (nextSection) {
+                    window.scrollTo({ top: nextSection.offsetTop, behavior: 'smooth' });
+                  }
+                });
                 return;
               }
 
-              const skipPhase1 = currentFrame >= 125;
-              const splitScroll = skipPhase1 ? scrollBottom : containerTop + totalDistance * splitRatio;
+              const skipPhase1 = currentFrame >= Math.round(AUTOPLAY_SPLIT_RATIO * totalFrames);
+              const splitScroll = skipPhase1 ? scrollBottom : containerTop + totalDistance * AUTOPLAY_SPLIT_RATIO;
               const totalDuration = skipPhase1 ? 3000 : 5000;
 
               let startTime: number | null = null;
