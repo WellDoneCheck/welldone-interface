@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import type { Map as MapLibreMap } from 'maplibre-gl';
-import TileMap, { useMapProject, type Bounds } from './TileMap';
+import TileMap, { type Bounds } from './TileMap';
 import { STATUS_META, type WellMarker, type WellStatus } from '../data/monitor';
 import { useSiteChrome } from './SiteChrome';
 import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
@@ -169,9 +169,22 @@ function ControlButton({ label, disabled, onClick, children }: { label: string; 
 
 /* ─── Map ───────────────────────────────────────────────────────── */
 
+// Draws again each time the map's zoom comes to rest (not on every frame of it)
+function useZoomEnd(map: MapLibreMap | null) {
+  const [, setZooms] = useState(0);
+  useEffect(() => {
+    if (!map) return;
+    const onZoomEnd = () => setZooms((count) => count + 1);
+    map.on('zoomend', onZoomEnd);
+    return () => {
+      map.off('zoomend', onZoomEnd);
+    };
+  }, [map]);
+}
+
 // Zoom in, back to the whole strip, zoom out; follows the map's zoom to know when a button can no longer be used
 function ZoomControls({ map, fit }: { map: MapLibreMap | null; fit: { bounds: Bounds; padding: { top: number; bottom: number; left: number; right: number } } }) {
-  useMapProject(map);
+  useZoomEnd(map);
   return (
     <div className="absolute right-3 top-3 z-20 flex flex-col gap-2">
       <ControlButton label="放大" disabled={!map || map.getZoom() >= ZOOM_IN_LIMIT} onClick={() => map?.zoomIn()}>
