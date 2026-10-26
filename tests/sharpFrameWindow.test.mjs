@@ -14,7 +14,7 @@ test('frames further away are dropped', () => {
 });
 
 test('the frames showFrame fetches ahead and behind stay inside the window', () => {
-  // showFrame fetches 4 ahead and 2 behind
-  assert.equal(isSharpFrameKept(104, 100), true);
+  // showFrame fetches 8 ahead and 2 behind
+  assert.equal(isSharpFrameKept(108, 100), true);
   assert.equal(isSharpFrameKept(98, 100), true);
 });
