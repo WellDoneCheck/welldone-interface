@@ -1,13 +1,10 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 import { useSiteChrome } from './SiteChrome';
 import { prefetch, useBackend, type Loaded } from './useBackend';
+import { useReadyLink } from './useReadyLink';
 import { loadCheckView, type CheckView } from '../utils/routeRecords';
-
-// How long a link into the check page holds on for the page to be read before it goes anyway
-const READY_WAIT_MS = 1500;
 
 const checkKey = (userId: string, code: string | null) => `check:${userId}:${code ?? ''}`;
 
@@ -29,28 +26,10 @@ export function usePrefetchCheckView(code: string | null): void {
   }, [userId, code]);
 }
 
-// A link into a well's check page that never arrives before the page is ready: readAhead (on hover or focus) starts
-// reading it; clicked while it is still being read, the link holds on until it is (READY_WAIT_MS at most), then goes,
-// so the page shows at once and its shared elements fly over
+// A link into a well's check page that never arrives before the page is read (useReadyLink), so the page shows at
+// once and its shared elements fly over
 export function useCheckLink(code: string, transitionTypes: string[]) {
-  const router = useRouter();
   const { session } = useSiteChrome();
-  const going = useRef(false);
-  const href = `/check?record=${code}`;
   const read = () => (session ? prefetch(checkKey(session.userId, code), () => loadCheckView(code)) : null);
-
-  const onNavigate = (event: { preventDefault: () => void }) => {
-    const reading = read();
-    if (!reading) return;
-    event.preventDefault();
-    if (going.current) return;
-    going.current = true;
-    const waited = new Promise((resolve) => setTimeout(resolve, READY_WAIT_MS));
-    Promise.race([reading, waited]).then(() => {
-      going.current = false;
-      router.push(href, { transitionTypes });
-    });
-  };
-
-  return { href, onNavigate, readAhead: () => void read() };
+  return useReadyLink(`/check?record=${code}`, read, transitionTypes);
 }

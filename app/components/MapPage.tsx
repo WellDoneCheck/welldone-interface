@@ -23,6 +23,8 @@ import SharedTransition, {
   SHARED,
   TO_CHECK,
   markBackToUpload,
+  clearOpeningMap,
+  isOpeningMap,
   pagePart,
 } from './SharedTransition';
 import BackToMapLink from './BackToMapLink';
@@ -98,6 +100,9 @@ const ARRIVAL_CARD_DELAY_MS = 400;
 // Coming back from the check page to the map as it was left, the map is a picture of it until the page transition is
 // over (globals.css: 650-750ms) and only then started, so the work of starting it stays out of the transition's frames
 const RETURN_MAP_START_MS = 800;
+// Opening the map from its upload record, the map starts once the row has grown into it (globals.css: 750ms); until
+// then the row grows into the map's bare ground
+const OPEN_MAP_START_MS = 800;
 
 // Clicking a pin zooms in to at least this level (never out), with the pin in the middle of the map left of the card
 const PIN_FOCUS_ZOOM = 21;
@@ -217,6 +222,8 @@ interface MapCanvasProps {
   startFocus: { well: MapWell; zoom: number } | null;
   // a picture of the map at startCamera, shown while the map starts after the page transition
   startImage: string | null;
+  // arrived from its upload record: the map starts once the row has grown into it
+  openedFromUpload: boolean;
   // the map, once it has started (kept by the page, which shows where the pointer is on it)
   onMapReady: (map: MapLibreMap | null) => void;
   scale: number;
@@ -226,7 +233,7 @@ interface MapCanvasProps {
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -244,7 +251,7 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
     // a picture of where the map is left with a well, for coming back to it from its check page
     onRestImage: selectedId ? (image) => rememberMapImage(selectedId, image) : undefined,
     placeholder: startImage ?? undefined,
-    startAfter: startImage ? RETURN_MAP_START_MS : 0,
+    startAfter: startImage ? RETURN_MAP_START_MS : openedFromUpload ? OPEN_MAP_START_MS : 0,
     onMapClick: (event) => onMapClick(event),
   });
   useEffect(() => onMapReady(map), [map, onMapReady]);
@@ -797,6 +804,9 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
     if (camera) return { camera, focus: null, image: mapImageFor(initialWell.id) };
     return { camera: null, focus: { well: initialWell, zoom: Math.max(lastMapZoom() ?? 0, PIN_FOCUS_ZOOM) }, image: null };
   });
+  // read once as the page arrives (React may run this twice while developing, so cleared in an effect, not here)
+  const [openedFromUpload] = useState(isOpeningMap);
+  useEffect(() => clearOpeningMap(), []);
   const scale = useFitScale(OVERLAY_STAGE);
   const cornerScale = useFitScale(CORNER_STAGE);
   const [map, setMap] = useState<MapLibreMap | null>(null);
@@ -855,6 +865,7 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
         startCamera={returnView.camera}
         startFocus={returnView.focus}
         startImage={returnView.image}
+        openedFromUpload={openedFromUpload}
         onMapReady={setMap}
         scale={scale}
         onPinClick={selectPin}

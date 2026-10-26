@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { prefetch } from '../app/components/useBackend.ts';
+import { prefetch, whenAllRead } from '../app/components/useBackend.ts';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -30,4 +30,12 @@ test('a failed read ahead settles (a link waiting on it goes on) and can be trie
   await tick();
   assert.ok(prefetch('prefetch:failed', failing) instanceof Promise);
   assert.equal(reads, 2);
+});
+
+test('reads ahead taken together: nothing to wait for once all are done, else all of them', async () => {
+  assert.equal(whenAllRead([null, null]), null);
+  let done = false;
+  const reading = new Promise((resolve) => setTimeout(() => resolve((done = true)), 5));
+  await whenAllRead([null, reading]);
+  assert.equal(done, true);
 });

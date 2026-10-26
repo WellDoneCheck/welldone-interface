@@ -7,6 +7,7 @@ import { uploadInChunks } from '../utils/chunkedUpload';
 import { canDelete, canRename, canRetry, canUpload, displayName, groupByYear, uploadError, type RecordStatus, type TaskRecord } from '../utils/tasks';
 import { useTaskRecords } from './useTaskRecords';
 import { useSiteChrome } from './SiteChrome';
+import { useMapLink } from './useMapView';
 import { useFitScale, type FitStage } from './useFitScale';
 import SharedTransition, {
   ONLY_TO_UPLOAD,
@@ -91,11 +92,16 @@ const STATUS_STYLES: Record<
 
 function RecordRow({ record, name }: { record: TaskRecord; name: string }) {
   const styles = STATUS_STYLES[record.status];
+  // read ahead as the pointer or focus comes to the row, so the map page is ready (and its map started) when it opens
+  const mapLink = useMapLink(record.id, OPEN_MAP);
 
   return (
     <Link
-      href={`/map?record=${record.id}`}
+      href={mapLink.href}
       transitionTypes={OPEN_MAP}
+      onNavigate={mapLink.onNavigate}
+      onPointerEnter={mapLink.readAhead}
+      onFocus={mapLink.readAhead}
       aria-label={`檢視 ${name} 的地圖`}
       className="group/row block outline-none"
     >
@@ -203,6 +209,7 @@ interface RecordTrayProps {
 // Contents of the tray: the action list, the rename form or the delete confirmation
 function RecordTray({ record, name, renamable, deletable, retriable, mode, onModeChange, onRename, onDelete, onRetry }: RecordTrayProps) {
   const [draft, setDraft] = useState(name);
+  const mapLink = useMapLink(record.id, OPEN_MAP);
 
   if (mode === 'rename') {
     const save = () => {
@@ -252,7 +259,14 @@ function RecordTray({ record, name, renamable, deletable, retriable, mode, onMod
 
   return (
     <div className="flex flex-1 items-center gap-1">
-      <Link href={`/map?record=${record.id}`} transitionTypes={OPEN_MAP} className={`${TRAY_BUTTON} text-white/85 hover:bg-white/10 hover:text-white`}>
+      <Link
+        href={mapLink.href}
+        transitionTypes={OPEN_MAP}
+        onNavigate={mapLink.onNavigate}
+        onPointerEnter={mapLink.readAhead}
+        onFocus={mapLink.readAhead}
+        className={`${TRAY_BUTTON} text-white/85 hover:bg-white/10 hover:text-white`}
+      >
         <MapIcon />
         開啟地圖
       </Link>

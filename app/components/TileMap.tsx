@@ -220,6 +220,17 @@ function showImagery(map: MapLibreMap, imagery: Imagery | null) {
 
 const MAPLIBRE_WORKER_URL = '/maplibre-worker/maplibre-gl-worker.mjs';
 
+// MapLibre's code (a megabyte) loaded ahead, e.g. for a link into a map page: what to wait for, or null once loaded
+let mapLibreLoaded = false;
+let mapLibreLoading: Promise<void> | null = null;
+export function preloadMapLibre(): Promise<void> | null {
+  if (mapLibreLoaded) return null;
+  mapLibreLoading ??= import('maplibre-gl').then(() => {
+    mapLibreLoaded = true;
+  });
+  return mapLibreLoading;
+}
+
 // The container's colour, seen through the map where no tile covers it (yet): the electronic map's own pale grey ground
 const MAP_BACKGROUND: [number, number, number] = [0xf7, 0xf7, 0xf7];
 

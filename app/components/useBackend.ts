@@ -27,6 +27,12 @@ export function prefetch<T>(key: string, load: () => Promise<T>): Promise<void> 
   return read;
 }
 
+// Several reads ahead (prefetch) as one: what to wait for while any is under way, or null once they all are done
+export function whenAllRead(reads: (Promise<unknown> | null)[]): Promise<unknown> | null {
+  const pending = reads.filter((read) => read !== null);
+  return pending.length > 0 ? Promise.all(pending) : null;
+}
+
 // Reads something from the backend, again whenever key changes; null reads nothing (e.g. nobody is logged in)
 export function useBackend<T>(key: string | null, load: () => Promise<T>): Loaded<T> {
   const [result, setResult] = useState<{ key: string; loaded: Loaded<T> } | null>(null);

@@ -70,6 +70,18 @@ export function isBackToUpload(): boolean {
 export function clearBackToUpload(): void {
   backToUpload = false;
 }
+// Set by an upload record's link into the map page just before it goes, read by the map page as it arrives: its map
+// then starts once the row has grown into it, so the work of starting it stays out of the transition's frames
+let openingMap = false;
+export function markOpeningMap(): void {
+  openingMap = true;
+}
+export function isOpeningMap(): boolean {
+  return openingMap;
+}
+export function clearOpeningMap(): void {
+  openingMap = false;
+}
 // Home page's photo wall into the monitor page: its recognition accuracy flies into the accuracy card, fading like a
 // well card from the export page (the export-card class in globals.css); other ways to the monitor page leave it be
 export const TO_MONITOR = ['to-monitor'];
