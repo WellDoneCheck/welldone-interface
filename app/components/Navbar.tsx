@@ -69,7 +69,10 @@ export default function Navbar({
   }, [pathname, router]);
 
   useEffect(() => {
-    const onScroll = () => {
+    // read at most once a frame, however many scroll events come in
+    let frame = 0;
+    const update = () => {
+      frame = 0;
       setScrolled(window.scrollY > 50);
       // Detect Kove section: find its top position relative to the document
       const section = document.querySelector('[data-section="kove"]');
@@ -83,9 +86,15 @@ export default function Navbar({
         setInKove(heroIsLight);
       }
     };
+    const onScroll = () => {
+      if (!frame) frame = requestAnimationFrame(update);
+    };
     window.addEventListener('scroll', onScroll, { passive: true });
-    onScroll();
-    return () => window.removeEventListener('scroll', onScroll);
+    update();
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('scroll', onScroll);
+    };
   }, []);
 
   // Close mobile menu on outside click

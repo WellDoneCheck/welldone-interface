@@ -4,11 +4,12 @@ import { useRef, useEffect, useState, useCallback, type ReactNode } from 'react'
 import WellLoader from './WellLoader';
 import { isSharpFrameKept } from '../utils/sharpFrameWindow';
 import { PIN_FOLD_MS, PIN_TIP, PIN_WIDTH, STILL_FROM_FRAME, STILL_START_SCALE, pinFold, stillScale } from '../utils/heroStill';
+import { LIGHT_FRAMES_IN_FLIGHT, TITLE_HIDE_END_FRAME, TITLE_HIDE_START_FRAME, isTitleShown, lightFramesBeforeStart } from '../utils/heroFrames';
 
 interface ScrollImageSequenceProps {
   totalFrames: number;
   framePattern: string;
-  // Same frames at a lower resolution: all of them load up front and stand in until the sharp frame is ready
+  // Same frames at a lower resolution: they stand in until the sharp frame is ready (see heroFrames for when they load)
   lightFramePattern: string;
   // Scroll distance (vh) that plays the frames
   scrollHeight?: number;
@@ -66,6 +67,7 @@ export default function ScrollImageSequence({
   const frameCacheRef = useRef<Map<number, HTMLImageElement>>(new Map);
   const decodedFramesRef = useRef<Set<number>>(new Set());
   const lightFrameCacheRef = useRef<Map<number, HTMLImageElement>>(new Map());
+  const decodedLightFramesRef = useRef<Set<number>>(new Set());
   const [framesReady, setFramesReady] = useState(false);
   const [loadProgress, setLoadProgress] = useState(0);
   const [timeProgress, setTimeProgress] = useState(0);
@@ -113,10 +115,11 @@ export default function ScrollImageSequence({
     [getUrl, totalFrames],
   );
 
+  // The masked copy only follows the frames while the title is up (see the scroll handler): past it, it is hidden
   const applySrc = useCallback((img: HTMLImageElement) => {
     if (imgRef.current && imgRef.current.src !== img.src) {
       imgRef.current.src = img.src;
-      if (maskImgRef.current) maskImgRef.current.src = img.src;
+      if (maskImgRef.current && maskLayerRef.current?.style.visibility !== 'hidden') maskImgRef.current.src = img.src;
     }
   }, []);
 
@@ -138,6 +141,23 @@ export default function ScrollImageSequence({
     [applySrc],
   );
 
+  // The light stand-in is decoded off the main thread too, and shown once decoded unless its sharp frame got there first
+  const decodeLightFrame = useCallback(
+    (frameIndex: number) => {
+      if (decodedLightFramesRef.current.has(frameIndex)) return;
+      const light = lightFrameCacheRef.current.get(frameIndex);
+      if (!light?.complete || light.naturalWidth === 0) return;
+      light
+        .decode()
+        .then(() => {
+          decodedLightFramesRef.current.add(frameIndex);
+          if (pendingFrameRef.current === frameIndex && !decodedFramesRef.current.has(frameIndex)) applySrc(light);
+        })
+        .catch(() => {});
+    },
+    [applySrc],
+  );
+
   const showFrame = useCallback(
     (frameIndex: number) => {
       if (frameIndex === lastFrameRef.current) return;
@@ -150,14 +170,17 @@ export default function ScrollImageSequence({
       if (sharp && decodedFramesRef.current.has(frameIndex)) {
         applySrc(sharp);
       } else {
+        // until then the frame shown stays up, rather than one still being decoded on the main thread
         const light = lightFrameCacheRef.current.get(frameIndex);
-        if (light?.complete && light.naturalWidth > 0) applySrc(light);
+        if (light && decodedLightFramesRef.current.has(frameIndex)) applySrc(light);
+        else decodeLightFrame(frameIndex);
         if (sharp) whenLoaded(sharp, () => decodeFrame(frameIndex));
       }
 
-      for (let i = 1; i <= 8; i++) cacheImage(frameCacheRef.current, framePattern, frameIndex + i);
+      for (let i = 1; i <= 4; i++) cacheImage(frameCacheRef.current, framePattern, frameIndex + i);
       for (let i = 1; i <= 2; i++) cacheImage(frameCacheRef.current, framePattern, frameIndex - i);
       for (let i = 1; i <= 4; i++) {
+        decodeLightFrame(frameIndex + i);
         const ahead = frameCacheRef.current.get(frameIndex + i);
         if (ahead) whenLoaded(ahead, () => decodeFrame(frameIndex + i));
       }
@@ -170,7 +193,7 @@ export default function ScrollImageSequence({
         decodedFramesRef.current.delete(index);
       }
     },
-    [cacheImage, decodeFrame, applySrc, framePattern],
+    [cacheImage, decodeFrame, decodeLightFrame, applySrc, framePattern],
   );
 
   const applyPinFold = useCallback((progress: number) => {
@@ -244,7 +267,7 @@ export default function ScrollImageSequence({
           }
 
           // Fade out the first-frame gradient from frame 0 to frame 20
-          const gradientOpacity = Math.max(0, 1 - progress / (20 / totalFrames));
+          const gradientOpacity = Math.max(0, 1 - progress / (TITLE_HIDE_END_FRAME / totalFrames));
           if (gradientRef.current) gradientRef.current.style.opacity = String(gradientOpacity);
           if (maskGradientRef.current) maskGradientRef.current.style.opacity = String(gradientOpacity);
 
@@ -255,8 +278,8 @@ export default function ScrollImageSequence({
           // Handle text animation (the hero action moves with the title)
           for (const textEl of [textRef.current, heroActionRef.current]) {
             if (!textEl) continue;
-            const hideStart = 2 / totalFrames;
-            const hideEnd = 20 / totalFrames;
+            const hideStart = TITLE_HIDE_START_FRAME / totalFrames;
+            const hideEnd = TITLE_HIDE_END_FRAME / totalFrames;
             let ty = 0;
             let opacity = 1;
             if (progress > hideStart) {
@@ -266,6 +289,16 @@ export default function ScrollImageSequence({
             }
             textEl.style.transform = `translateY(${ty}vh)`;
             textEl.style.opacity = String(opacity);
+          }
+
+          // With the title gone there is nothing for the masked copy to pass in front of: hide it, so it is not
+          // painted again on every frame; shown again, it catches up with the frame on screen
+          const maskLayer = maskLayerRef.current;
+          if (maskLayer) {
+            const titleShown = isTitleShown(progress * totalFrames);
+            maskLayer.style.visibility = titleShown ? 'visible' : 'hidden';
+            const shownSrc = imgRef.current?.src;
+            if (titleShown && maskImgRef.current && shownSrc && maskImgRef.current.src !== shownSrc) maskImgRef.current.src = shownSrc;
           }
 
           ticking = false;
@@ -386,12 +419,14 @@ export default function ScrollImageSequence({
     return () => clearTimeout(timer);
   }, [loading]);
 
-  // Every light frame (up to the still photo) loads before the page starts, so whichever frame scrolling reaches
-  // always has something to show; the still photo and pin are decoded up front too, so they appear without a hitch
+  // The first light frames load before the page starts, the rest behind it a few at a time (in order, so they arrive
+  // ahead of the scrolling); the still photo and pin are decoded up front too, so they appear without a hitch
   useEffect(() => {
     let loaded = 0;
+    let cancelled = false;
     const stillImages = [stillImgRef.current, pinImgRef.current];
-    const total = STILL_FROM_FRAME + stillImages.length;
+    const firstFrames = lightFramesBeforeStart();
+    const total = firstFrames + stillImages.length;
 
     const check = () => {
       loaded++;
@@ -410,7 +445,7 @@ export default function ScrollImageSequence({
       else check();
     }
 
-    for (let i = 0; i < STILL_FROM_FRAME; i++) {
+    for (let i = 0; i < firstFrames; i++) {
       const frameImg = cacheImage(lightFrameCacheRef.current, lightFramePattern, i);
       if (!frameImg) continue;
 
@@ -420,6 +455,20 @@ export default function ScrollImageSequence({
         frameImg.onerror = check;
       }
     }
+
+    let next = firstFrames;
+    const loadNext = () => {
+      if (cancelled || next >= STILL_FROM_FRAME) return;
+      const frameImg = cacheImage(lightFrameCacheRef.current, lightFramePattern, next++);
+      if (!frameImg) return loadNext();
+      if (frameImg.complete) return loadNext();
+      frameImg.onload = loadNext;
+      frameImg.onerror = loadNext;
+    };
+    for (let i = 0; i < LIGHT_FRAMES_IN_FLIGHT; i++) loadNext();
+    return () => {
+      cancelled = true;
+    };
   }, [cacheImage, lightFramePattern, showFrame]);
 
   return (
@@ -472,7 +521,7 @@ export default function ScrollImageSequence({
         </div>
 
         {/* Layer 3: masked video — reveals the text behind it */}
-        <div className="absolute inset-0 z-[12] overflow-hidden select-none pointer-events-none">
+        <div ref={maskLayerRef} className="absolute inset-0 z-[12] overflow-hidden select-none pointer-events-none">
           <img
             ref={maskImgRef}
             alt=""

@@ -69,12 +69,12 @@ export default function FloatingGrid() {
   }, []);
 
   const IMAGES = [
-    { src: '/landing_page/grid/01.png', ratio: 'aspect-[3/4]' },
-    { src: '/landing_page/grid/02.png', ratio: 'aspect-square' },
-    { src: '/landing_page/grid/03.png', ratio: 'aspect-[4/5]' },
-    { src: '/landing_page/grid/04.png', ratio: 'aspect-[3/4]' },
-    { src: '/landing_page/grid/05.png', ratio: 'aspect-square' },
-    { src: '/landing_page/grid/06.png', ratio: 'aspect-[2/3]' },
+    { src: '/landing_page/grid/01.webp', ratio: 'aspect-[3/4]' },
+    { src: '/landing_page/grid/02.webp', ratio: 'aspect-square' },
+    { src: '/landing_page/grid/03.webp', ratio: 'aspect-[4/5]' },
+    { src: '/landing_page/grid/04.webp', ratio: 'aspect-[3/4]' },
+    { src: '/landing_page/grid/05.webp', ratio: 'aspect-square' },
+    { src: '/landing_page/grid/06.webp', ratio: 'aspect-[2/3]' },
   ];
 
   return (
