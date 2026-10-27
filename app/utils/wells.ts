@@ -4,6 +4,7 @@ import type { Task } from './tasks';
 import { taipeiDateTime } from './taipeiTime';
 import type { Role } from './session';
 import type { Imagery } from './tileServer';
+import { saveVerdict } from './wellVerdicts';
 
 export type Verdict = 'well' | 'not-well';
 
@@ -70,10 +71,13 @@ export function toWebMercator({ latitude, longitude }: Point): { e: number; n: n
 export const isOnImagery = ([west, south, east, north]: Imagery['bounds'], { latitude, longitude }: Point) =>
   longitude >= west && longitude <= east && latitude >= south && latitude <= north;
 
-// Adds a well by hand where it was placed on its map (Backend-SPEC §4.5): the backend gives it its code. Throws the
-// backend's message when it is not added.
-export const addWell = (taskId: string, point: Point) =>
-  api<Pick<WellView, 'id' | 'code'>>('/wells', { method: 'POST', body: { taskId, ...toWebMercator(point) } });
+// Adds a well by hand where it was placed on its map (Backend-SPEC §4.5): the backend gives it its code. Someone saw a
+// well there, so it is verified as one. Throws the backend's message when it is not added or verified.
+export async function addWell(taskId: string, point: Point): Promise<Pick<WellView, 'id' | 'code'>> {
+  const well = await api<Pick<WellView, 'id' | 'code'>>('/wells', { method: 'POST', body: { taskId, ...toWebMercator(point) } });
+  await saveVerdict({ id: well.code, wellId: well.id }, 'well');
+  return well;
+}
 
 // Viewers only look (§3)
 export const canAddWell = (role: Role) => role !== 'viewer';

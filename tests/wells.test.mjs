@@ -34,7 +34,7 @@ test('a well can be placed only on its map\'s imagery, and is written as the oth
   assert.equal(coordinatesText({ latitude: 23.830123, longitude: 120.460234 }), '23.83012, 120.46023');
 });
 
-test('a well added by hand is posted to its map, and only operators and admins may', async () => {
+test('a well added by hand is posted to its map and verified as a well, and only operators and admins may', async () => {
   const sent = [];
   globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   globalThis.fetch = async (url, init) => {
@@ -44,7 +44,10 @@ test('a well added by hand is posted to its map, and only operators and admins m
   const point = { latitude: 23.5, longitude: 120 };
   const well = await addWell('task-1', point);
   assert.equal(well.code, 'SW-2026-A009');
-  assert.deepEqual(sent, [{ path: '/wells', method: 'POST', body: { taskId: 'task-1', ...toWebMercator(point) } }]);
+  assert.deepEqual(sent, [
+    { path: '/wells', method: 'POST', body: { taskId: 'task-1', ...toWebMercator(point) } },
+    { path: '/wells/9/verdict', method: 'PATCH', body: { verdict: 'well' } },
+  ]);
   assert.equal(canAddWell('operator'), true);
   assert.equal(canAddWell('admin'), true);
   assert.equal(canAddWell('viewer'), false);
