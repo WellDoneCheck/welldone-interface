@@ -8,7 +8,7 @@ import { canDelete, canRename, canRetry, canUpload, displayName, groupByYear, up
 import { useTaskRecords } from './useTaskRecords';
 import { useSiteChrome } from './SiteChrome';
 import { useMapLink } from './useMapView';
-import { fileUrl } from '../utils/api';
+import { useBackendImage } from './useBackendImage';
 import { taskCoverUrl } from '../utils/tileServer';
 import { useFitScale, type FitStage } from './useFitScale';
 import SharedTransition, {
@@ -94,13 +94,14 @@ const STATUS_STYLES: Record<
 
 // The map's own cover, faded in over the stock background once read (the stock one stays until the map is cut)
 function RecordCover({ taskId }: { taskId: string }) {
+  const cover = useBackendImage(taskCoverUrl(taskId));
   const [loaded, setLoaded] = useState(false);
+  if (!cover) return null;
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address
+    // eslint-disable-next-line @next/next/no-img-element -- read from the backend with the token's header
     <img
-      src={fileUrl(taskCoverUrl(taskId))}
+      src={cover}
       alt=""
-      loading="lazy"
       className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ease-out ${loaded ? 'opacity-100' : 'opacity-0'}`}
       onLoad={() => setLoaded(true)}
     />

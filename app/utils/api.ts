@@ -137,10 +137,14 @@ export function uploadChunk(path: string, chunk: Blob, fields: { uploadId: strin
   return sendForm<void>(path, form, (_percent, loaded) => onLoaded(loaded));
 }
 
-// The full address of a backend file with the token in it, for <img> and download links that cannot send headers (§2.3)
-export function fileUrl(path: string): string {
-  const token = getSession()?.token;
-  if (!token) return API_URL + path;
-  const separator = path.includes('?') ? '&' : '?';
-  return `${API_URL}${path}${separator}token=${encodeURIComponent(token)}`;
+// A backend file (an image) read with the token's header, as an <img> cannot send it; throws ApiError when it failed
+export async function fetchFile(path: string, signal?: AbortSignal): Promise<Blob> {
+  let response: Response;
+  try {
+    response = await fetch(API_URL + path, { ...buildRequest({}), signal });
+  } catch {
+    throw new ApiError(0, NETWORK_ERROR);
+  }
+  if (!response.ok) readAnswer(response.status, await response.text());
+  return response.blob();
 }

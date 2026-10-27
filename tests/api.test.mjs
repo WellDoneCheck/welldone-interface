@@ -1,6 +1,6 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { api, API_URL, ApiError, errorMessage, fileUrl } from '../app/utils/api.ts';
+import { api, API_URL, ApiError, errorMessage, fetchFile } from '../app/utils/api.ts';
 import { clearSession, getSession, startSession } from '../app/utils/session.ts';
 
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
@@ -86,9 +86,15 @@ test('a 401 the call expects (a wrong current password) keeps the user logged in
   assert.notEqual(getSession(), null);
 });
 
-test('file addresses carry the token for <img> and downloads', () => {
-  assert.equal(fileUrl('/wells/1/ai-image/image'), `${API_URL}/wells/1/ai-image/image?token=${token}`);
-  assert.equal(fileUrl('/wells/1/image?size=256'), `${API_URL}/wells/1/image?size=256&token=${token}`);
-  clearSession();
-  assert.equal(fileUrl('/wells/1/image'), `${API_URL}/wells/1/image`);
+test('a file is read with the token in its header, not in its address', async () => {
+  respond(200, 'webp');
+  const file = await fetchFile('/tasks/t1/tiles/cover');
+  assert.equal(await file.text(), 'webp');
+  assert.equal(requests[0].url, `${API_URL}/tasks/t1/tiles/cover`);
+  assert.equal(requests[0].init.headers.Authorization, `Bearer ${token}`);
+});
+
+test('a file that is not there (404) throws, so the page keeps its stand-in', async () => {
+  respond(404, { message: 'Task t1 沒有可顯示的影像' });
+  await assert.rejects(fetchFile('/tasks/t1/tiles/cover'), { status: 404, message: 'Task t1 沒有可顯示的影像' });
 });

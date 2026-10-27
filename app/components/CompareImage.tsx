@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode, type RefObject } from 'react';
 import Image from 'next/image';
-import { fileUrl } from '../utils/api';
+import { useBackendImage } from './useBackendImage';
 import { formatDate, type Capture } from '../utils/captures';
 import { MAX_SCALE, MIN_SCALE, UNZOOMED, panBy, zoomAt, type ZoomView } from '../utils/imageZoom';
 
@@ -28,15 +28,11 @@ const clampPercent = (value: number) => Math.min(100, Math.max(0, value));
 
 // Square photo of the well in a capture, centred on it (from the backend; the frame's colour where it has none)
 export function CaptureImage({ capture }: { capture: Capture }) {
+  const image = useBackendImage(capture.image);
+  if (!image) return null;
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address
-    <img
-      src={fileUrl(capture.image)}
-      alt=""
-      draggable={false}
-      className="absolute inset-0 h-full w-full object-cover"
-      onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
-    />
+    // eslint-disable-next-line @next/next/no-img-element -- read from the backend with the token's header
+    <img src={image} alt="" draggable={false} className="absolute inset-0 h-full w-full object-cover" />
   );
 }
 

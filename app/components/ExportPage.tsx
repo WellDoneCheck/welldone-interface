@@ -12,11 +12,11 @@ import LoadNotice from './LoadNotice';
 import { useSiteChrome } from './SiteChrome';
 import { useMapView } from './useMapView';
 import { usePageSearchParams } from './usePageSearchParams';
-import { fileUrl } from '../utils/api';
 import { wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
 import { buildWellsCsv } from '../utils/wellsCsv';
 import { downloadCsv } from '../utils/csv';
 import { useCheckLink } from './useCheckView';
+import { useBackendImage } from './useBackendImage';
 
 // Laid out for the 1920px-wide Figma frame; height 0 lets only the viewport width decide the scale
 const EXPORT_STAGE: FitStage = { width: 1920, height: 0, marginX: 0, marginY: 0, minViewportWidth: 0 };
@@ -162,6 +162,7 @@ function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellC
   const badge = BADGES[lookOf(well.verdict)];
   // read ahead as the pointer or focus comes to the photo, so the check page is ready when it is opened
   const check = useCheckLink(well.id, FROM_EXPORT);
+  const photo = useBackendImage(wellImageUrl(well, CARD_WIDTH));
 
   return (
     // cards scrolled out of the row are not rendered until they come into view (50 cards with large shadows)
@@ -181,14 +182,14 @@ function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellC
             className="group/photo absolute inset-0 block overflow-hidden outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
           >
             {/* once opened, the photo drops its hover look at once, so it flies to the check page as the bare capture */}
-            {/* eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address */}
-            <img
-              src={fileUrl(wellImageUrl(well, CARD_WIDTH))}
-              alt={`${well.id} 空拍影像`}
-              loading="lazy"
-              onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
-              className={`absolute inset-0 h-full w-full object-cover ${shared ? '' : 'transition-transform duration-500 ease-[var(--ease-expo)] group-hover/photo:scale-[1.04]'}`}
-            />
+            {photo && (
+              // eslint-disable-next-line @next/next/no-img-element -- read from the backend with the token's header
+              <img
+                src={photo}
+                alt={`${well.id} 空拍影像`}
+                className={`absolute inset-0 h-full w-full object-cover ${shared ? '' : 'transition-transform duration-500 ease-[var(--ease-expo)] group-hover/photo:scale-[1.04]'}`}
+              />
+            )}
             <span
               className={`absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-[14px] opacity-0 transition-opacity duration-300 group-hover/photo:opacity-100 group-focus-visible/photo:opacity-100 ${
                 shared ? 'invisible' : ''
