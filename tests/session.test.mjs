@@ -59,6 +59,15 @@ test('a session ends once its token expires', () => {
   assert.equal(stored.has('skywell:token'), false);
 });
 
+test('noticing an expired token tells no listener, since React notices it while rendering', () => {
+  startSession(makeToken(payload), NOW);
+  let calls = 0;
+  const unsubscribe = subscribeToSession(() => calls++);
+  assert.equal(getSession(NOW + 8 * HOUR), null);
+  unsubscribe();
+  assert.equal(calls, 0);
+});
+
 test('an expired token is not kept', () => {
   assert.equal(startSession(makeToken({ ...payload, exp: NOW / 1000 }), NOW), null);
   assert.equal(stored.has('skywell:token'), false);

@@ -62,10 +62,12 @@ function load(now: number): Session | null {
   }
 }
 
-// The current session, or null when logged out or the token has expired
+// The current session, or null when logged out or the token has expired. React reads it while rendering
+// (useSyncExternalStore), so an expired token is dropped without telling the listeners: telling them would update a
+// component in the middle of its render
 export function getSession(now = Date.now()): Session | null {
   session ??= load(now);
-  if (session && session.expiresAt <= now) clearSession();
+  if (session && session.expiresAt <= now) forget();
   return session;
 }
 
@@ -83,13 +85,17 @@ export function startSession(token: string, now = Date.now()): Session | null {
   return session;
 }
 
-export function clearSession(): void {
+function forget(): void {
   session = null;
   try {
     localStorage.removeItem(STORAGE_KEY);
   } catch {
     // storage blocked: nothing was saved
   }
+}
+
+export function clearSession(): void {
+  forget();
   notify();
 }
 
