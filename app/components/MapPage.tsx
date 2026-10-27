@@ -505,10 +505,20 @@ function MapLegend({ hidden, tiles }: { hidden: boolean; tiles: Record<TileState
   return (
     <div
       aria-hidden={hidden}
-      className={`absolute transition-opacity duration-500 ${MOTION} ${hidden ? 'opacity-0' : 'opacity-100'}`}
+      // as the site's other page parts come and go (page-part in globals.css): fades out where it is, then is moved down
+      // out of sight; once the card has slid away, fades back in rising
+      className={`group absolute motion-reduce:transition-none ${
+        hidden
+          ? 'translate-y-[14px] opacity-0 [transition:opacity_260ms_ease-in,translate_0s_260ms]'
+          : 'pointer-events-auto translate-y-0 opacity-100 [transition:opacity_520ms_cubic-bezier(0.22,1,0.36,1)_220ms,translate_520ms_cubic-bezier(0.22,1,0.36,1)_220ms]'
+      }`}
       style={{ ...pagePart('map-legend'), right: PAGE_GUTTER, bottom: PAGE_GAP }}
     >
-      <div className="flex flex-col gap-[14px] bg-[#F7F6F1]/92 py-[22px] pl-[26px] pr-[32px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]" style={{ zoom: scale }}>
+      {/* only the contents lift on hover, like the shortcuts in the other corner */}
+      <div
+        className={`flex flex-col gap-[14px] bg-[#F7F6F1]/92 py-[22px] pl-[26px] pr-[32px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)] transition-transform duration-500 ${MOTION} group-hover:-translate-y-1`}
+        style={{ zoom: scale }}
+      >
         <span className="text-[18px] font-bold text-[#6F7468]">圖例</span>
         {LEGEND.map((entry) => (
           <span key={entry.look} className="flex items-center gap-[12px] text-[21px] font-bold text-[#2C322F]">
