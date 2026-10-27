@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ExpressionSpecification, GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
 import { countStates, readTileProgress, type TileProgress, type TileState } from '../utils/tileProgress';
 
@@ -25,9 +25,9 @@ export const TILE_COLOR: Record<TileState, string> = { uncut: '#2C322F', process
 const TILE_OPACITY: Record<Exclude<TileState, 'processing'>, number> = { uncut: 0.18, failed: 0.45, pending: 0.18 };
 const PULSE_OPACITY = [0.2, 0.65];
 
-// The map's tiles, read again every POLL_MS while it is cut or recognised (readTileProgress); null until there is
-// something to draw. A failed read is tried again.
-function useTileProgress(taskId: string): TileProgress | null {
+// The map's tiles, read again every POLL_MS while it is cut or recognised (readTileProgress), and from the start again
+// whenever round changes (after a retry); null until there is something to draw. A failed read is tried again.
+function useTileProgress(taskId: string, round: number): TileProgress | null {
   const [read, setRead] = useState<{ taskId: string; progress: TileProgress } | null>(null);
 
   useEffect(() => {
@@ -49,7 +49,7 @@ function useTileProgress(taskId: string): TileProgress | null {
       current = false;
       clearTimeout(timer);
     };
-  }, [taskId]);
+  }, [taskId, round]);
 
   return read?.taskId === taskId ? read.progress : null;
 }
@@ -111,13 +111,20 @@ export interface TileProgressLayer {
   bounds: TileProgress['bounds'] | null;
   // the imagery cut so far, while cutting
   imagery: TileProgress['imagery'];
+  // the AI has finished, so the tiles it left open can be sent to it again
+  retryable: boolean;
+  // the tile waiting to be recognised under a point on the map, if any
+  pendingTileAt: (point: { x: number; y: number }) => { row: number; col: number } | null;
+  // reads the tiles again from the start (they are no longer read once the AI has finished)
+  readAgain: () => void;
 }
 
 // How far an imported map has got, tile by tile, over the map: the tiles not cut yet while it is cut, then the tiles
 // the AI has still to recognise, each coloured by its state (the ones it is at pulse); a tile it has recognised is
 // taken off. Taken off the map when the page goes (the map may stay for the next: SurveyMap).
 export function useTileProgressLayer(map: MapLibreMap | null, taskId: string): TileProgressLayer {
-  const progress = useTileProgress(taskId);
+  const [round, setRound] = useState(0);
+  const progress = useTileProgress(taskId, round);
   const features = progress?.features ?? null;
 
   useEffect(() => {
@@ -142,5 +149,23 @@ export function useTileProgressLayer(map: MapLibreMap | null, taskId: string): T
     return () => clearInterval(timer);
   }, [map, pulsing]);
 
-  return { counts, recognised: progress?.recognised ?? null, bounds: progress?.bounds ?? null, imagery: progress?.imagery ?? null };
+  const pendingTileAt = useCallback(
+    (point: { x: number; y: number }) => {
+      if (!map?.getLayer(FILL_LAYER)) return null;
+      const tile = map.queryRenderedFeatures([point.x, point.y], { layers: [FILL_LAYER], filter: ['==', ['get', 'state'], 'pending'] })[0];
+      return tile ? { row: tile.properties.row as number, col: tile.properties.col as number } : null;
+    },
+    [map],
+  );
+  const readAgain = useCallback(() => setRound((count) => count + 1), []);
+
+  return {
+    counts,
+    recognised: progress?.recognised ?? null,
+    bounds: progress?.bounds ?? null,
+    imagery: progress?.imagery ?? null,
+    retryable: progress?.retryable ?? false,
+    pendingTileAt,
+    readAgain,
+  };
 }

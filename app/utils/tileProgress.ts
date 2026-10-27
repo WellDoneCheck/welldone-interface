@@ -57,7 +57,7 @@ function tileSquare({ geoTransform: [originE, pixelWidth, , originN, , pixelHeig
   return [point(x, y), point(x + tileSize, y), point(x + tileSize, y + tileSize), point(x, y + tileSize), point(x, y)];
 }
 
-export type TileFeatures = GeoJSON.FeatureCollection<GeoJSON.Polygon, { state: TileState }>;
+export type TileFeatures = GeoJSON.FeatureCollection<GeoJSON.Polygon, { state: TileState; row: number; col: number }>;
 
 const cellKey = ({ row, col }: Cell) => `${row}/${col}`;
 
@@ -66,7 +66,7 @@ function tileFeatures(grid: TileGrid, tiles: { cell: Cell; state: TileState }[])
     type: 'FeatureCollection',
     features: tiles.map(({ cell, state }) => ({
       type: 'Feature',
-      properties: { state },
+      properties: { state, row: cell.row, col: cell.col },
       geometry: { type: 'Polygon', coordinates: [tileSquare(grid, cell.row, cell.col)] },
     })),
   };
@@ -119,6 +119,9 @@ export const recognisedCount = (progress: AiTileProgress) => progress.tiles.filt
 // Worth reading again: tiles are left to recognise and the AI has not finished. A failed task counts as not finished:
 // the backend marks it failed when it cannot reach the AI service for a while, though the AI may carry on and still
 // send its tiles in.
+// The AI has finished (or been marked failed): only then are the tiles it left open sent to it again (a retry)
+export const aiFinished = (progress: AiTileProgress) => progress.taskStatus === 'completed' || progress.taskStatus === 'failed';
+
 export function keepReading(progress: AiTileProgress, features: TileFeatures): boolean {
   return progress.taskStatus !== 'completed' && features.features.length > 0;
 }
@@ -138,6 +141,8 @@ export interface TileProgress {
   bounds: TileGrid['bounds'];
   // the imagery cut so far, while cutting (null: none yet, or cut: the imported map's own)
   imagery: Imagery | null;
+  // the tiles left open can be sent to the AI again (aiFinished)
+  retryable: boolean;
 }
 
 // The map's tiles as they are now (null: nothing to draw yet, not being cut), and whether to read them again: while
@@ -147,10 +152,11 @@ export async function readTileProgress(taskId: string): Promise<{ progress: Tile
   if (split === 'waiting') return { progress: null, again: true };
   if (split !== 'completed') {
     const grid = await fetchTileGrid(taskId);
-    const progress = { features: uncutFeatures(grid), recognised: null, bounds: grid.bounds, imagery: cutImagery(grid) };
+    const progress = { features: uncutFeatures(grid), recognised: null, bounds: grid.bounds, imagery: cutImagery(grid), retryable: false };
     return { progress, again: split === 'active' };
   }
   const [grid, ai] = await Promise.all([fetchTileGrid(taskId), fetchAiTiles(taskId)]);
   const features = recognitionFeatures(grid, ai);
-  return { progress: { features, recognised: recognisedCount(ai), bounds: grid.bounds, imagery: null }, again: keepReading(ai, features) };
+  const progress = { features, recognised: recognisedCount(ai), bounds: grid.bounds, imagery: null, retryable: aiFinished(ai) };
+  return { progress, again: keepReading(ai, features) };
 }

@@ -5,6 +5,7 @@ import {
   cutImagery,
   keepReading,
   mercatorToLngLat,
+  aiFinished,
   readTileProgress,
   recognisedCount,
   recognitionFeatures,
@@ -56,6 +57,15 @@ test('once cut, only the tiles still to recognise are drawn; one the AI has not 
   assert.deepEqual(states(features), ['processing', 'failed']);
   assert.deepEqual(countStates(features), { uncut: 0, pending: 0, processing: 1, failed: 1 });
   assert.deepEqual(states(recognitionFeatures(grid, ai('pending', []))), ['pending', 'pending', 'pending']);
+});
+
+test('each tile drawn knows its row and column, and can be sent to the AI again only once it has finished', () => {
+  const features = recognitionFeatures(grid, ai('failed', [[0, 0, 'done']]));
+  assert.deepEqual(features.features.map(({ properties: { row, col } }) => [row, col]), [[0, 1], [1, 0]]);
+  assert.equal(aiFinished(ai('pending', [])), false);
+  assert.equal(aiFinished(ai('processing', [])), false);
+  assert.equal(aiFinished(ai('failed', [])), true);
+  assert.equal(aiFinished(ai('completed', [])), true);
 });
 
 test('every tile is a whole square, the one cut short at the edge too', () => {
@@ -121,5 +131,6 @@ test('a cut map shows the tiles still to recognise and how many are recognised',
   assert.deepEqual(states(progress.features), ['processing', 'pending']);
   assert.equal(progress.recognised, 1);
   assert.equal(progress.imagery, null);
+  assert.equal(progress.retryable, false);
   assert.equal(again, true);
 });
