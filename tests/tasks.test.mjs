@@ -117,7 +117,7 @@ test('a retry is offered only once recognition has stopped with tiles left', () 
   assert.equal(toRecord(task('completed', 'failed')).retryable, false);
 });
 
-test('a retry sends every failed and unreached tile (no body) and only operators and admins may', async () => {
+test('a retry sends every failed and unreached tile (no body), or only the tiles given, and only operators and admins may', async () => {
   const sent = [];
   globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
   globalThis.fetch = async (url, init) => {
@@ -126,6 +126,8 @@ test('a retry sends every failed and unreached tile (no body) and only operators
   };
   await retryRecognition('task-1');
   assert.deepEqual(sent, [{ path: '/tasks/task-1/ai/retry', method: 'POST', body: undefined }]);
+  await retryRecognition('task-1', [{ row: 2, col: 1 }]);
+  assert.deepEqual(sent[1], { path: '/tasks/task-1/ai/retry', method: 'POST', body: '{"tiles":[{"row":2,"col":1}]}' });
   assert.equal(canRetry('operator'), true);
   assert.equal(canRetry('admin'), true);
   assert.equal(canRetry('viewer'), false);

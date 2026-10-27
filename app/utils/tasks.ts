@@ -177,8 +177,9 @@ export function toRecord(task: Task, progress?: TaskProgress, now = Date.now()):
   };
 }
 
-// Sends every tile failed or not reached to the AI again (Backend-SPEC §4.2 AI retry)
-export const retryRecognition = (taskId: string) => api(`/tasks/${encodeURIComponent(taskId)}/ai/retry`, { method: 'POST' });
+// Sends every tile failed or not reached to the AI again, or only the tiles given (Backend-SPEC §4.2 AI retry)
+export const retryRecognition = (taskId: string, tiles?: { row: number; col: number }[]) =>
+  api(`/tasks/${encodeURIComponent(taskId)}/ai/retry`, { method: 'POST', body: tiles && { tiles } });
 
 export interface YearGroup {
   year: string;
