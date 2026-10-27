@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addWell, canAddWell, removeWell, coordinatesText, isOnImagery, toMapWell, toWebMercator, wellImageUrl } from '../app/utils/wells.ts';
+import { addWell, canAddWell, removeWell, confidenceText, coordinatesText, isOnImagery, toMapWell, toWebMercator, wellImageUrl } from '../app/utils/wells.ts';
 
 const view = { id: 7, code: 'SW-2026-A007', task_id: 'task-1', verdict: 'well', confidence: 0.9, source: 'ai', latitude: 23.830123, longitude: 120.460234 };
 
@@ -55,4 +55,10 @@ test('a well added by hand is posted to its map and verified as a well, and only
   assert.equal(canAddWell('operator'), true);
   assert.equal(canAddWell('admin'), true);
   assert.equal(canAddWell('viewer'), false);
+});
+
+test('the AI\'s confidence shows as a percentage; a well added by hand says so instead', () => {
+  assert.equal(confidenceText(0.9234), '92%');
+  assert.equal(confidenceText(1), '100%');
+  assert.equal(confidenceText(null), '人工標記');
 });

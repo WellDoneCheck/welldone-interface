@@ -33,17 +33,18 @@ import BackToMapLink from './BackToMapLink';
 import CursorCoordinates from './CursorCoordinates';
 import { mapHref } from '../utils/routeRecords';
 import { useWellVerdicts } from './useWellVerdicts';
-import { lookOf, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
+import { canVerify, lookOf, saveVerdict, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
 import { canDelete, canRetry, retryRecognition, type NamedTask, type Task } from '../utils/tasks';
 import { useSiteChrome } from './SiteChrome';
 import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
-import { addWell, canAddWell, coordinatesText, isOnImagery, removeWell, wellImageUrl, type MapWell } from '../utils/wells';
+import { addWell, canAddWell, confidenceText, coordinatesText, isOnImagery, removeWell, wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
 import { rememberVisit } from '../utils/lastVisit';
 import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, useViewportSize } from './pageFrame';
 
 const CARD_WIDTH = 680;
-const CARD_HEIGHT = 869;
+// with a row under the time for the AI's confidence (35px, after the rows' 13px gap)
+const CARD_HEIGHT = 917;
 // Type and card scale with the window width like the 1920px Figma frame, but the card must also fit under the navbar
 const OVERLAY_STAGE: FitStage = { width: 1920, height: CARD_HEIGHT, marginX: 0, marginY: FRAME_MARGIN_Y, minViewportWidth: 0 };
 // The view tabs stick out this far past the card's right edge; the tabs' outer edge lines up with the navbar
@@ -757,6 +758,64 @@ function InfoRow({ icon, text }: { icon: string; text: string }) {
 
 const MOTION = 'ease-[var(--ease-expo)] motion-reduce:transition-none';
 
+const CARD_VERDICTS: { verdict: Verdict; label: string }[] = [
+  { verdict: 'well', label: '是井' },
+  { verdict: 'not-well', label: '不是井' },
+];
+
+// Whether the well is a well, given right on the card: a button each in its verification colour (VERDICT_COLOR), as on
+// the check page, the one not chosen faded once one is; viewers only look (canVerify). Shared with the check and export
+// pages and the pins (saveVerdict).
+function CardVerdict({ record }: { record: MapWell }) {
+  const verdict = verdictOf(record, useWellVerdicts());
+  const { session } = useSiteChrome();
+  const allowed = session !== null && canVerify(session.role);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const choose = async (next: Verdict) => {
+    if (next === verdict) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await saveVerdict(record, next);
+    } catch (failure) {
+      setError((failure as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="relative flex gap-[10px]">
+      {CARD_VERDICTS.map((item) => {
+        const selected = verdict === item.verdict;
+        return (
+          <button
+            key={item.verdict}
+            type="button"
+            aria-pressed={selected}
+            disabled={!allowed || saving}
+            onClick={() => choose(item.verdict)}
+            className={`h-[56px] w-[124px] text-[22px] font-bold text-[#FBFBF8] shadow-[0_4px_12px_rgba(0,0,0,0.18)] transition-all duration-300 ${MOTION} enabled:hover:brightness-110 enabled:active:scale-[0.97] disabled:cursor-not-allowed ${
+              verdict !== null && !selected ? 'opacity-40' : ''
+            }`}
+            style={{ backgroundColor: VERDICT_COLOR[item.verdict] }}
+          >
+            {selected && '✓ '}
+            {item.label}
+          </button>
+        );
+      })}
+      {error && (
+        <span title={error} className="absolute bottom-full right-0 mb-[6px] max-w-full truncate text-[14px] font-bold text-[#BC5646]">
+          {error}
+        </span>
+      )}
+    </div>
+  );
+}
+
 interface ViewTabProps {
   mode: ViewMode;
   label: string;
@@ -904,16 +963,23 @@ function CardFace({ record, shared, faceMode, viewMode, showing, onViewModeChang
         <WellPhoto viewMode={faceMode} well={record} shared={shared} showing={showing} />
       </div>
 
-      <SharedTransition name={SHARED.wellId} enabled={shared}>
-        <h2 className="mt-6 px-1 text-[48px] font-black leading-[normal] text-[#2C322F]">{record.id}</h2>
-      </SharedTransition>
-      <div className="mt-px flex flex-col gap-[13px] px-1">
-        <SharedTransition name={SHARED.wellCoordinates} enabled={shared}>
-          <InfoRow icon="/map/icon-location.png" text={record.coordinates} />
-        </SharedTransition>
-        <SharedTransition name={SHARED.wellTime} enabled={shared}>
-          <InfoRow icon="/map/icon-time.png" text={record.timestamp.slice(0, 16)} />
-        </SharedTransition>
+      {/* the well on the left; whether it is a well in the bottom right corner, level with its last row */}
+      <div className="mt-6 flex items-end justify-between px-1">
+        <div className="shrink-0">
+          <SharedTransition name={SHARED.wellId} enabled={shared}>
+            <h2 className="whitespace-nowrap text-[48px] font-black leading-[normal] text-[#2C322F]">{record.id}</h2>
+          </SharedTransition>
+          <div className="mt-px flex flex-col gap-[13px]">
+            <SharedTransition name={SHARED.wellCoordinates} enabled={shared}>
+              <InfoRow icon="/map/icon-location.png" text={record.coordinates} />
+            </SharedTransition>
+            <SharedTransition name={SHARED.wellTime} enabled={shared}>
+              <InfoRow icon="/map/icon-time.png" text={record.timestamp.slice(0, 16)} />
+            </SharedTransition>
+            <InfoRow icon="/map/icon-confidence.svg" text={record.confidence === null ? confidenceText(null) : `AI 信心度 ${confidenceText(record.confidence)}`} />
+          </div>
+        </div>
+        <CardVerdict record={record} />
       </div>
 
       {VIEW_TABS.map((tab) => (
