@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefO
 import { flushSync } from 'react-dom';
 import type { Map as MapLibreMap, MapMouseEvent, PaddingOptions, RasterSourceSpecification, StyleSpecification, SymbolLayerSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { authorizeTile, BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM, BASEMAP_TILES, IMAGERY_TILE_SIZE, type Imagery } from '../utils/tileServer';
+import { asWebp, authorizeTile, BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM, BASEMAP_TILES, IMAGERY_TILE_SIZE, throughSite, type Imagery } from '../utils/tileServer';
 import { isLightBackdrop, reportLogoBackdrop } from '../utils/logoBackdrop';
 import type { MapCamera } from '../utils/mapCamera';
 import type { ViewportSize } from './pageFrame';
@@ -177,12 +177,15 @@ function Overlay({ map, children }: { map: MapLibreMap; children: (view: MapView
   );
 }
 
-const RASTER_PAINT = { 'raster-fade-duration': 200 };
+// a tile shows as soon as it has loaded, rather than fading in: zooming out, the area just come into view stays empty
+// for less long
+const RASTER_PAINT = { 'raster-fade-duration': 0 };
 
-// An imported map's imagery, from the backend (§4.4); outside its bounds the backend has no tiles to ask for
+// An imported map's imagery, from the backend (§4.4) through the site (throughSite), as WebP (asWebp); outside its
+// bounds the backend has no tiles to ask for
 const imagerySource = (imagery: Imagery): RasterSourceSpecification => ({
   type: 'raster',
-  tiles: imagery.tiles,
+  tiles: imagery.tiles.map((template) => throughSite(asWebp(template), window.location.origin)),
   tileSize: IMAGERY_TILE_SIZE,
   bounds: imagery.bounds,
   minzoom: imagery.minzoom,
@@ -370,8 +373,7 @@ export default function TileMap({
   const firstStartAfter = useRef(startAfter);
   const firstFit = useRef(fit);
   const firstCamera = useRef(camera);
-  // the imagery shown: its tiles are asked for with the token (transformRequest), and it is swapped when it changes
-  const imageryRef = useRef(imagery);
+  // the imagery shown: swapped when it changes
   const shownImagery = useRef(imagery);
   const onMapClickRef = useRef(onMapClick);
   useEffect(() => {
@@ -393,7 +395,7 @@ export default function TileMap({
         created = new Map({
           container: containerRef.current,
           style: mapStyle(shownImagery.current),
-          transformRequest: (url) => authorizeTile(url, imageryRef.current),
+          transformRequest: (url) => authorizeTile(url, window.location.origin),
           ...(start ? { center: start.center, zoom: start.zoom } : { bounds, fitBoundsOptions: { padding } }),
           interactive,
           maxBounds: shownImagery.current ? panLimit(shownImagery.current.bounds) : undefined,
@@ -460,7 +462,6 @@ export default function TileMap({
   }, [map, fitKey]);
 
   useEffect(() => {
-    imageryRef.current = imagery;
     if (!map || imagery?.tiles[0] === shownImagery.current?.tiles[0]) return;
     shownImagery.current = imagery;
     showImagery(map, imagery);

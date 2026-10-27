@@ -20,11 +20,27 @@ export const IMAGERY_TILE_SIZE = 256;
 // 404 until the map has been cut
 export const fetchImagery = (taskId: string) => api<Imagery>(`/tasks/${encodeURIComponent(taskId)}/tiles/tilejson`);
 
-// For MapLibre's transformRequest: the backend's tiles need the logged-in user's token (§2.4); others (the electronic
-// map) go as they are. Told apart by the imagery's own address, which may differ from NEXT_PUBLIC_API_URL.
-export function authorizeTile(url: string, imagery: Imagery | null): { url: string; headers?: Record<string, string> } {
+// The site's own path to the backend (next.config.ts forwards it there). The imagery's tiles are asked for through it:
+// asked for at the backend's address, the token's header made the browser check with the backend first (a CORS
+// preflight), for every tile, so zooming out took twice the requests to fill the map
+export const BACKEND_PROXY_PATH = '/backend';
+
+// An imagery tile address (a template from the backend) on the site's own origin, through BACKEND_PROXY_PATH
+export function throughSite(template: string, siteOrigin: string): string {
+  return siteOrigin + BACKEND_PROXY_PATH + template.replace(/^https?:\/\/[^/]+/, '');
+}
+
+// An imagery tile address (a template from the backend) asking for WebP rather than PNG: the backend makes either
+// (§4.4), and a WebP tile is about a ninth the size, so a moved map fills sooner
+export function asWebp(template: string): string {
+  return template.replace(/\{y\}\.png(?=\?|$)/, '{y}.webp');
+}
+
+// For MapLibre's transformRequest: the backend's tiles (asked for through the site, throughSite) need the logged-in
+// user's token (§2.4); others (the electronic map) go as they are
+export function authorizeTile(url: string, siteOrigin: string): { url: string; headers?: Record<string, string> } {
   const token = getSession()?.token;
-  const fromBackend = imagery?.tiles.some((template) => url.startsWith(new URL(template).origin + '/'));
+  const fromBackend = url.startsWith(siteOrigin + BACKEND_PROXY_PATH + '/');
   return token && fromBackend ? { url, headers: { Authorization: `Bearer ${token}` } } : { url };
 }
 
