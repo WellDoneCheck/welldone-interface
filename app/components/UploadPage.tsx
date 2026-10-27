@@ -491,10 +491,10 @@ function FileRow({ file, index, onRemove }: { file: UploadFile; index: number; o
       <div className="mt-3 w-[406px] shrink-0">
         <p className="truncate text-[23px] leading-[33px] text-[#2C322F]">{file.file.name}</p>
         <div className="relative mt-[5px] h-[1.5px]">
-          <Image src="/upload/progress-track.svg" alt="" width={406} height={2} className="absolute inset-0 h-[1.5px] w-full" />
+          <Image src="/upload/progress-track.svg" alt="" fill />
           {!hasError && progress > 0 && (
             <div className="absolute inset-y-0 left-0 h-[1.5px]" style={{ width: `${progress}%` }}>
-              <Image src="/upload/progress-fill.svg" alt="" width={303} height={2} className="absolute inset-0 h-[1.5px] w-full" />
+              <Image src="/upload/progress-fill.svg" alt="" fill />
               {file.status === 'uploading' && (
                 <>
                   {/* teal dashes flowing to the right, with a glowing head at the leading edge */}
