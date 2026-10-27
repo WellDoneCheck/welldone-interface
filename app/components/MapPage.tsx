@@ -7,6 +7,7 @@ import Link from 'next/link';
 import ModelRender from './ModelRender';
 import ExportEntry from './ExportEntry';
 import CompareEntry from './CompareEntry';
+import PinEntry from './PinEntry';
 import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent, MapMouseEvent } from 'maplibre-gl';
 import { drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapLayer, useMapProject, type Bounds, type Icon, type Project } from './TileMap';
 import { useSurveyMap } from './SurveyMap';
@@ -36,7 +37,7 @@ import { lookOf, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wel
 import { canRetry, retryRecognition, type NamedTask } from '../utils/tasks';
 import { useSiteChrome } from './SiteChrome';
 import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
-import { wellImageUrl, type MapWell } from '../utils/wells';
+import { addWell, canAddWell, coordinatesText, isOnImagery, wellImageUrl, type MapWell } from '../utils/wells';
 import { rememberVisit } from '../utils/lastVisit';
 import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, useViewportSize } from './pageFrame';
@@ -164,8 +165,8 @@ const wellFeatures = (wells: MapWell[], verdicts: ReturnType<typeof useWellVerdi
   pointFeatures(wells, (well) => ({ id: well.id, look: lookOf(verdictOf(well, verdicts)) }));
 
 // The map's layer of pins: every well but the selected one (a page element), at the page's scale and smaller the
-// further out (pinScaleExpression). onHover: the well under the pointer, or null.
-function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: string | null, scale: number, onHover: (id: string | null) => void) {
+// further out (pinScaleExpression). onHover: the well under the pointer, or null (never while hoverable is false).
+function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: string | null, scale: number, hoverable: boolean, onHover: (id: string | null) => void) {
   const ready = useIconLayer(map, WELL_LAYER, shadowedPins, {
     'icon-image': ['match', ['get', 'look'], 'well', PIN_IMAGE.well, 'not-well', PIN_IMAGE['not-well'], PIN_IMAGE.pending],
     'icon-offset': PIN_OFFSET,
@@ -186,7 +187,7 @@ function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: 
   }, [ready, map, scale]);
 
   useEffect(() => {
-    if (!ready || !map) return;
+    if (!ready || !map || !hoverable) return;
     const enter = (event: MapLayerMouseEvent) => {
       map.getCanvas().style.cursor = 'pointer';
       onHover(event.features?.[0]?.properties?.id ?? null);
@@ -200,10 +201,11 @@ function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: 
     return () => {
       map.off('mousemove', WELL_LAYER, enter);
       map.off('mouseleave', WELL_LAYER, leave);
-      // the map may stay for the next page (SurveyMap): not left with this page's pointer
+      // the map may stay for the next page (SurveyMap): not left with this page's pointer, nor a label
       map.getCanvas().style.cursor = '';
+      onHover(null);
     };
-  }, [ready, map, onHover]);
+  }, [ready, map, hoverable, onHover]);
 }
 
 interface MapCanvasProps {
@@ -230,13 +232,15 @@ interface MapCanvasProps {
   scale: number;
   onPinClick: (id: string) => void;
   onDismiss: () => void;
-  // a click on the map off the pins, where it was on screen
-  onGroundClick: (point: { x: number; y: number }) => void;
+  // the next click on the map places a well (on a pin too): a crosshair, and no pin is picked or labelled
+  placing: boolean;
+  // a click on the map off the pins (anywhere while placing), where it was
+  onGroundClick: (at: GroundClick) => void;
 }
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, onGroundClick }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, placing, onGroundClick }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -274,7 +278,7 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
   }, [map, selectedId]);
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  useWellPinLayer(map, wells, selectedId ?? null, scale, setHoveredId);
+  useWellPinLayer(map, wells, selectedId ?? null, scale, !placing, setHoveredId);
   const hovered = hoveredId === selectedId ? undefined : wells.find((well) => well.id === hoveredId);
 
   // a pin opening its card: bring it into the space left of the card, zoomed in
@@ -309,13 +313,23 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
     onPinClick(well.id);
   };
 
-  // a click on the map: on a pin it drew, that pin; anywhere else, closes the card
+  // placing a well, a crosshair over the whole map
+  useEffect(() => {
+    if (!map || !placing) return;
+    const canvas = map.getCanvas();
+    canvas.style.cursor = 'crosshair';
+    return () => {
+      canvas.style.cursor = '';
+    };
+  }, [map, placing]);
+
+  // a click on the map: on a pin it drew, that pin (unless placing); anywhere else, closes the card
   function onMapClick(event: MapMouseEvent) {
-    const id = map ? iconAt(map, WELL_LAYER, event.point, 'id') : undefined;
+    const id = map && !placing ? iconAt(map, WELL_LAYER, event.point, 'id') : undefined;
     const well = wells.find((candidate) => candidate.id === id);
     if (well) return pickPin(well);
     onDismiss();
-    onGroundClick(event.point);
+    onGroundClick({ ...event.point, longitude: event.lngLat.lng, latitude: event.lngLat.lat, pinSize: map ? PIN_SIZE * pinScaleOn(map, scale) : 0 });
   }
 
   return (
@@ -600,6 +614,71 @@ function TileRetryMenu({ taskId, at, scale, onRetried }: { taskId: string; at: T
   );
 }
 
+// Where the map was clicked: on screen, on the ground, and how large a pin is drawn there
+interface GroundClick {
+  x: number;
+  y: number;
+  longitude: number;
+  latitude: number;
+  pinSize: number;
+}
+
+// A well about to be placed by hand: a faint pin where the map was clicked, and beside it the way to add it there (onAdded
+// with its code once added and read in), or why it cannot be (off the imagery)
+function WellDraftMenu({ taskId, at, onImagery, scale, onAdded, onCancel }: { taskId: string; at: GroundClick; onImagery: boolean; scale: number; onAdded: (code: string) => Promise<void>; onCancel: () => void }) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const add = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      const well = await addWell(taskId, at);
+      await onAdded(well.code);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+      setSending(false);
+    }
+  };
+  const pinTop = at.y - at.pinSize * PIN_TIP;
+  return (
+    <>
+      <Image
+        src="/map/pin.png"
+        alt=""
+        width={90}
+        height={90}
+        draggable={false}
+        className="pointer-events-none absolute h-auto max-w-none opacity-70 drop-shadow-[0_6px_6px_rgba(0,0,0,0.35)]"
+        style={{ left: at.x - at.pinSize / 2, top: pinTop, width: at.pinSize }}
+      />
+      <div className="pointer-events-auto absolute" style={{ left: at.x + at.pinSize / 2, top: pinTop }}>
+        <div role="dialog" aria-label="新增水井" className="flex flex-col gap-[10px] bg-[#F7F6F1] p-[14px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]" style={{ zoom: scale }}>
+          <span className="text-[16px] font-bold text-[#6F7468]">新增水井</span>
+          <span className="text-[18px] font-bold tabular-nums text-[#2C322F]">{coordinatesText(at)}</span>
+          {onImagery ? (
+            <div className="flex gap-[8px]">
+              <button
+                type="button"
+                disabled={sending}
+                onClick={add}
+                className="bg-[#BC5646] px-[22px] py-[8px] text-[20px] font-bold text-[#FBFBF8] transition-[filter] hover:brightness-110 disabled:opacity-60"
+              >
+                {sending ? '新增中…' : '新增'}
+              </button>
+              <button type="button" disabled={sending} onClick={onCancel} className="px-[14px] py-[8px] text-[20px] font-bold text-[#6F7468] hover:text-[#2C322F] disabled:opacity-60">
+                取消
+              </button>
+            </div>
+          ) : (
+            <span className="max-w-[240px] text-[15px] font-bold text-[#BC5646]">這裡不在地圖影像範圍內，請點影像上的位置</span>
+          )}
+          {error && <span className="max-w-[240px] text-[15px] font-bold text-[#BC5646]">{error}</span>}
+        </div>
+      </div>
+    </>
+  );
+}
+
 /* ─── Info card ─────────────────────────────────────────────────── */
 
 function InfoRow({ icon, text }: { icon: string; text: string }) {
@@ -858,7 +937,7 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
   const [map, setMap] = useState<MapLibreMap | null>(null);
   // how far this map has got, tile by tile, and its wells read again as the AI recognises more of them
   const tiles = useTileProgressLayer(map, mapFile.id);
-  const wells = useRecognisedWells(mapFile, arrivedWells, tiles.recognised);
+  const { wells, readAgain: readWellsAgain } = useRecognisedWells(mapFile, arrivedWells, tiles.recognised);
   // the AI starts once the map is cut, so its count is known only then; until then the imagery cut so far
   const imagery = useCutImagery(mapFile.id, arrivedImagery, tiles.recognised !== null) ?? tiles.imagery;
   const record = wells.find((candidate) => candidate.id === selectedId) ?? null;
@@ -869,6 +948,14 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
   const openTileMenu = (point: { x: number; y: number }) => {
     const cell = tilesRetriable ? tiles.pendingTileAt(point) : null;
     if (cell) setTileMenu({ cell, ...point });
+  };
+  // a well can be placed by hand on the map's imagery, by an operator or admin: the next click on the map places it
+  const wellsAddable = imagery !== null && session !== null && canAddWell(session.role);
+  const [placing, setPlacing] = useState(false);
+  const [draft, setDraft] = useState<GroundClick | null>(null);
+  const clickGround = (at: GroundClick) => {
+    if (placing) setDraft(at);
+    else openTileMenu(at);
   };
   // the open card's way into its check page (the photo) finds that page ready, so the photo flies there
   usePrefetchCheckView(cardOpen ? (record?.id ?? null) : null);
@@ -899,11 +986,27 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
   const closeCard = useCallback(() => {
     setCardOpen(false);
     setTileMenu(null);
+    setDraft(null);
   }, []);
+
+  const togglePlacing = () => {
+    closeCard();
+    setPlacing((on) => !on);
+  };
+
+  // the well placed, read in with the others: placing is over, and its card opens
+  const showAddedWell = async (code: string) => {
+    await readWellsAgain();
+    setPlacing(false);
+    setDraft(null);
+    selectPin(code);
+  };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') closeCard();
+      if (event.key !== 'Escape') return;
+      closeCard();
+      setPlacing(false);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -927,8 +1030,29 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
         scale={scale}
         onPinClick={selectPin}
         onDismiss={closeCard}
-        onGroundClick={openTileMenu}
+        placing={placing}
+        onGroundClick={clickGround}
       />
+
+      {placing && (
+        <div className="pointer-events-none absolute left-1/2 -translate-x-1/2" style={{ top: CONTENT_TOP }}>
+          <span className="block bg-[#2C322F]/85 px-[18px] py-[8px] text-[18px] font-bold text-white" style={{ zoom: cornerScale }}>
+            點地圖放置水井・Esc 取消
+          </span>
+        </div>
+      )}
+
+      {draft && (
+        <WellDraftMenu
+          key={`${draft.longitude}/${draft.latitude}`}
+          taskId={mapFile.id}
+          at={draft}
+          onImagery={imagery !== null && isOnImagery(imagery.bounds, draft)}
+          scale={cornerScale}
+          onAdded={showAddedWell}
+          onCancel={() => setDraft(null)}
+        />
+      )}
 
       {tileMenu && (
         <TileRetryMenu
@@ -954,6 +1078,7 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
         <div className="flex gap-[12px]" style={{ zoom: cornerScale }}>
           <ExportEntry recordId={mapFile.id} wells={wells} />
           <CompareEntry recordId={mapFile.id} />
+          {wellsAddable && <PinEntry placing={placing} onToggle={togglePlacing} />}
         </div>
       </div>
 

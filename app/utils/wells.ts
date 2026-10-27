@@ -2,6 +2,8 @@
 import { api } from './api';
 import type { Task } from './tasks';
 import { taipeiDateTime } from './taipeiTime';
+import type { Role } from './session';
+import type { Imagery } from './tileServer';
 
 export type Verdict = 'well' | 'not-well';
 
@@ -42,13 +44,39 @@ export function toMapWell(well: WellView, task: Pick<Task, 'created_at'>): MapWe
     wellId: well.id,
     latitude: well.latitude,
     longitude: well.longitude,
-    coordinates: `${well.latitude.toFixed(5)}, ${well.longitude.toFixed(5)}`,
+    coordinates: coordinatesText(well),
     timestamp: taipeiDateTime(task.created_at),
     recordId: well.task_id,
     verdict: well.verdict,
     confidence: well.confidence,
   };
 }
+
+type Point = Pick<MapWell, 'latitude' | 'longitude'>;
+
+// A point as the site writes it ('23.83012, 120.46023')
+export const coordinatesText = (point: Point) => `${point.latitude.toFixed(5)}, ${point.longitude.toFixed(5)}`;
+
+// Web Mercator's sphere (EPSG:3857), in metres
+const EARTH_RADIUS = 6378137;
+
+// A WGS84 point in the backend's EPSG:3857 metres (e east, n north), as POST /wells takes it
+export function toWebMercator({ latitude, longitude }: Point): { e: number; n: number } {
+  const radians = Math.PI / 180;
+  return { e: EARTH_RADIUS * longitude * radians, n: EARTH_RADIUS * Math.log(Math.tan(Math.PI / 4 + (latitude * radians) / 2)) };
+}
+
+// Whether a point lies on a map's imagery (its WGS84 bounds), where a well can be placed by hand
+export const isOnImagery = ([west, south, east, north]: Imagery['bounds'], { latitude, longitude }: Point) =>
+  longitude >= west && longitude <= east && latitude >= south && latitude <= north;
+
+// Adds a well by hand where it was placed on its map (Backend-SPEC §4.5): the backend gives it its code. Throws the
+// backend's message when it is not added.
+export const addWell = (taskId: string, point: Point) =>
+  api<Pick<WellView, 'id' | 'code'>>('/wells', { method: 'POST', body: { taskId, ...toWebMercator(point) } });
+
+// Viewers only look (§3)
+export const canAddWell = (role: Role) => role !== 'viewer';
 
 export async function fetchWells(task: Pick<Task, 'id' | 'created_at'>): Promise<MapWell[]> {
   const wells = await api<WellView[]>(`/wells?taskId=${encodeURIComponent(task.id)}`);
