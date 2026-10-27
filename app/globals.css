@@ -358,7 +358,7 @@ body {
 /* 上傳頁的地圖紀錄 ↔ 地圖頁的地圖（React share 類別 upload-record，只用在開啟地圖與「返回上傳頁面」）：
    外框從那一列放大成整個畫面（回來時縮回那一列），內容隨外框縮放並裁切填滿；舊的在中段淡出、新的接著淡入。
    疊在背景與上傳頁的面板之上（回來時縮進清單裡那一列，不被白色的清單蓋住），
-   但在地圖頁的返回鈕、檔名、座標與左下捷徑之下（2，見下），那些淡入時不會被放大中的地圖蓋住。
+   但在地圖頁的返回鈕、檔名、座標、左下捷徑與右下的圖例之下（2，見下），那些淡入時不會被放大中的地圖蓋住。
    兩者都只比沒設 z-index 的層高一點：仍在匯出抽屜（45）與飛行中的共用元素（40）之下，
    拉起匯出時那些按鈕不會一瞬間浮到抽屜上面 */
 ::view-transition-group(.upload-record) {
@@ -369,7 +369,8 @@ body {
 ::view-transition-group(back-to-map),
 ::view-transition-group(map-file),
 ::view-transition-group(map-cursor),
-::view-transition-group(map-shortcuts) {
+::view-transition-group(map-shortcuts),
+::view-transition-group(map-legend) {
   z-index: 2;
 }
 ::view-transition-image-pair(.upload-record) {
