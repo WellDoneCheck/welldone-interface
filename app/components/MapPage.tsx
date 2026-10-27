@@ -33,7 +33,8 @@ import CursorCoordinates from './CursorCoordinates';
 import { mapHref } from '../utils/routeRecords';
 import { useWellVerdicts } from './useWellVerdicts';
 import { lookOf, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
-import type { NamedTask } from '../utils/tasks';
+import { canRetry, retryRecognition, type NamedTask } from '../utils/tasks';
+import { useSiteChrome } from './SiteChrome';
 import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
 import { wellImageUrl, type MapWell } from '../utils/wells';
 import { rememberVisit } from '../utils/lastVisit';
@@ -229,11 +230,13 @@ interface MapCanvasProps {
   scale: number;
   onPinClick: (id: string) => void;
   onDismiss: () => void;
+  // a click on the map off the pins, where it was on screen
+  onGroundClick: (point: { x: number; y: number }) => void;
 }
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, onGroundClick }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -310,8 +313,9 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
   function onMapClick(event: MapMouseEvent) {
     const id = map ? iconAt(map, WELL_LAYER, event.point, 'id') : undefined;
     const well = wells.find((candidate) => candidate.id === id);
-    if (well) pickPin(well);
-    else onDismiss();
+    if (well) return pickPin(well);
+    onDismiss();
+    onGroundClick(event.point);
   }
 
   return (
@@ -548,6 +552,51 @@ function LeaderLine({ map, record, scale }: { map: MapLibreMap; record: MapWell;
         className="animate-[drawStroke_0.8s_ease-out_0.45s_both] motion-reduce:animate-none"
       />
     </svg>
+  );
+}
+
+// A tile waiting to be recognised, clicked once the AI has finished, and where on screen
+interface TileMenuAt {
+  cell: { row: number; col: number };
+  x: number;
+  y: number;
+}
+
+// Beside a clicked tile waiting to be recognised: sends that tile alone to the AI again (onRetried once it has gone)
+function TileRetryMenu({ taskId, at, scale, onRetried }: { taskId: string; at: TileMenuAt; scale: number; onRetried: () => void }) {
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const retry = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      await retryRecognition(taskId, [at.cell]);
+      onRetried();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+      setSending(false);
+    }
+  };
+  return (
+    <div className="pointer-events-auto absolute" style={{ left: at.x, top: at.y }}>
+      <div
+        role="dialog"
+        aria-label={`小圖 第 ${at.cell.row} 列・第 ${at.cell.col} 欄`}
+        className="flex flex-col gap-[10px] bg-[#F7F6F1] p-[14px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]"
+        style={{ zoom: scale }}
+      >
+        <span className="text-[16px] font-bold text-[#6F7468]">等待辨識的小圖</span>
+        <button
+          type="button"
+          disabled={sending}
+          onClick={retry}
+          className="bg-[#62A4A7] px-[22px] py-[8px] text-[20px] font-bold text-[#FBFBF8] transition-[filter] hover:brightness-110 disabled:opacity-60"
+        >
+          {sending ? '送出中…' : '辨識'}
+        </button>
+        {error && <span className="max-w-[240px] text-[15px] font-bold text-[#BC5646]">{error}</span>}
+      </div>
+    </div>
   );
 }
 
@@ -813,6 +862,14 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
   // the AI starts once the map is cut, so its count is known only then; until then the imagery cut so far
   const imagery = useCutImagery(mapFile.id, arrivedImagery, tiles.recognised !== null) ?? tiles.imagery;
   const record = wells.find((candidate) => candidate.id === selectedId) ?? null;
+  // a tile waiting to be recognised can be sent to the AI again once it has finished, by an operator or admin
+  const { session } = useSiteChrome();
+  const tilesRetriable = tiles.retryable && session !== null && canRetry(session.role);
+  const [tileMenu, setTileMenu] = useState<TileMenuAt | null>(null);
+  const openTileMenu = (point: { x: number; y: number }) => {
+    const cell = tilesRetriable ? tiles.pendingTileAt(point) : null;
+    if (cell) setTileMenu({ cell, ...point });
+  };
   // the open card's way into its check page (the photo) finds that page ready, so the photo flies there
   usePrefetchCheckView(cardOpen ? (record?.id ?? null) : null);
 
@@ -839,15 +896,18 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
   }, [openCardOnArrival, cardOpenAtStart]);
 
   // stays the same function, so the map's listeners for it are not taken off and put back on every render
-  const closeCard = useCallback(() => setCardOpen(false), []);
+  const closeCard = useCallback(() => {
+    setCardOpen(false);
+    setTileMenu(null);
+  }, []);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setCardOpen(false);
+      if (event.key === 'Escape') closeCard();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [closeCard]);
 
   return (
     // over the shared survey map (SurveyMap): lets drags and clicks through to it, except on its own parts
@@ -867,7 +927,21 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
         scale={scale}
         onPinClick={selectPin}
         onDismiss={closeCard}
+        onGroundClick={openTileMenu}
       />
+
+      {tileMenu && (
+        <TileRetryMenu
+          key={`${tileMenu.cell.row}/${tileMenu.cell.col}`}
+          taskId={mapFile.id}
+          at={tileMenu}
+          scale={cornerScale}
+          onRetried={() => {
+            setTileMenu(null);
+            tiles.readAgain();
+          }}
+        />
+      )}
 
       {/* back to the upload page (the map shrinks into this record's row there), with the map file shown beside it,
           just under the navbar's logo */}
