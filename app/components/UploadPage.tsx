@@ -8,6 +8,8 @@ import { canDelete, canRename, canRetry, canUpload, displayName, groupByYear, up
 import { useTaskRecords } from './useTaskRecords';
 import { useSiteChrome } from './SiteChrome';
 import { useMapLink } from './useMapView';
+import { fileUrl } from '../utils/api';
+import { taskCoverUrl } from '../utils/tileServer';
 import { useFitScale, type FitStage } from './useFitScale';
 import SharedTransition, {
   ONLY_TO_UPLOAD,
@@ -90,6 +92,21 @@ const STATUS_STYLES: Record<
 
 /* ─── RecordRow component ───────────────────────────────────────── */
 
+// The map's own cover, faded in over the stock background once read (the stock one stays until the map is cut)
+function RecordCover({ taskId }: { taskId: string }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address
+    <img
+      src={fileUrl(taskCoverUrl(taskId))}
+      alt=""
+      loading="lazy"
+      className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 ease-out ${loaded ? 'opacity-100' : 'opacity-0'}`}
+      onLoad={() => setLoaded(true)}
+    />
+  );
+}
+
 function RecordRow({ record, name }: { record: TaskRecord; name: string }) {
   const styles = STATUS_STYLES[record.status];
   // read ahead as the pointer or focus comes to the row, so the map page is ready (and its map started) when it opens
@@ -115,6 +132,7 @@ function RecordRow({ record, name }: { record: TaskRecord; name: string }) {
                 <div className="absolute left-[0.09%] top-[-766.25%] h-[868.58%] w-full">
                   <Image src="/upload/record-bg.webp" unoptimized alt="" fill sizes="995px" className="object-fill" />
                 </div>
+                <RecordCover taskId={record.id} />
               </div>
               <div className="absolute inset-0 bg-white/20" />
             </div>

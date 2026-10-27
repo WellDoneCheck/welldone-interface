@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asWebp, authorizeTile, BASEMAP_MAX_ZOOM, BASEMAP_TILES, throughSite } from '../app/utils/tileServer.ts';
+import { asWebp, authorizeTile, BASEMAP_MAX_ZOOM, BASEMAP_TILES, taskCoverUrl, throughSite } from '../app/utils/tileServer.ts';
 import { clearSession, startSession } from '../app/utils/session.ts';
 
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
@@ -47,4 +47,8 @@ test("the backend's tiles are asked for with the token, the electronic map's wit
 test('without a login, tiles go without a token', () => {
   clearSession();
   assert.equal(authorizeTile('http://site.local/backend/tasks/t1/tiles/16/1/2.png', site).headers, undefined);
+});
+
+test("a map's cover is the backend's WebP cut around its centre", () => {
+  assert.equal(taskCoverUrl('task 1'), '/tasks/task%201/tiles/cover');
 });

@@ -20,6 +20,9 @@ export const IMAGERY_TILE_SIZE = 256;
 // 404 until the map has been cut
 export const fetchImagery = (taskId: string) => api<Imagery>(`/tasks/${encodeURIComponent(taskId)}/tiles/tilejson`);
 
+// The map's cover for its upload record: a WebP cut around the map's centre; 404 until the map has been cut
+export const taskCoverUrl = (taskId: string) => `/tasks/${encodeURIComponent(taskId)}/tiles/cover`;
+
 // The site's own path to the backend (next.config.ts forwards it there). The imagery's tiles are asked for through it:
 // asked for at the backend's address, the token's header made the browser check with the backend first (a CORS
 // preflight), for every tile, so zooming out took twice the requests to fill the map
