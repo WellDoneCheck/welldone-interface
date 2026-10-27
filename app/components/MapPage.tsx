@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -34,10 +34,10 @@ import CursorCoordinates from './CursorCoordinates';
 import { mapHref } from '../utils/routeRecords';
 import { useWellVerdicts } from './useWellVerdicts';
 import { lookOf, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
-import { canRetry, retryRecognition, type NamedTask } from '../utils/tasks';
+import { canDelete, canRetry, retryRecognition, type NamedTask, type Task } from '../utils/tasks';
 import { useSiteChrome } from './SiteChrome';
 import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
-import { addWell, canAddWell, coordinatesText, isOnImagery, wellImageUrl, type MapWell } from '../utils/wells';
+import { addWell, canAddWell, coordinatesText, isOnImagery, removeWell, wellImageUrl, type MapWell } from '../utils/wells';
 import { rememberVisit } from '../utils/lastVisit';
 import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, useViewportSize } from './pageFrame';
@@ -236,11 +236,13 @@ interface MapCanvasProps {
   placing: boolean;
   // a click on the map off the pins (anywhere while placing), where it was
   onGroundClick: (at: GroundClick) => void;
+  // a right click on a well's pin, where it was on screen: true when it opens a menu of the page's (not the browser's)
+  onPinMenu: (well: MapWell, point: { x: number; y: number }) => boolean;
 }
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, placing, onGroundClick }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, placing, onGroundClick, onPinMenu }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -323,6 +325,20 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
     };
   }, [map, placing]);
 
+  // a right click on a pin the map drew: its menu, instead of the browser's
+  useEffect(() => {
+    if (!map) return;
+    const onContextMenu = (event: MapMouseEvent) => {
+      const id = iconAt(map, WELL_LAYER, event.point, 'id');
+      const well = wells.find((candidate) => candidate.id === id);
+      if (well && onPinMenu(well, event.point)) event.originalEvent.preventDefault();
+    };
+    map.on('contextmenu', onContextMenu);
+    return () => {
+      map.off('contextmenu', onContextMenu);
+    };
+  }, [map, wells, onPinMenu]);
+
   // a click on the map: on a pin it drew, that pin (unless placing); anywhere else, closes the card
   function onMapClick(event: MapMouseEvent) {
     const id = map && !placing ? iconAt(map, WELL_LAYER, event.point, 'id') : undefined;
@@ -346,6 +362,9 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
                   size={PIN_SIZE * pinScaleOn(map, scale)}
                   cardOpen={cardOpen}
                   onClick={() => pickPin(selected)}
+                  onContextMenu={(event) => {
+                    if (onPinMenu(selected, { x: event.clientX, y: event.clientY })) event.preventDefault();
+                  }}
                 />
               )}
               {hovered && <PinLabel well={hovered} corner={pinCorner(hovered, project, pinScaleOn(map, scale))} size={PIN_SIZE * pinScaleOn(map, scale)} />}
@@ -388,11 +407,12 @@ interface WellMarkerProps {
   size: number;
   cardOpen: boolean;
   onClick: () => void;
+  onContextMenu?: (event: ReactMouseEvent) => void;
 }
 
 // The selected well's pin, a page element (the others are drawn by the map); clicking it toggles its card. Coloured
 // by its verification as the map's pins are: the pin image itself while not verified, its shape filled otherwise.
-function WellMarker({ record, corner, size, cardOpen, onClick }: WellMarkerProps) {
+function WellMarker({ record, corner, size, cardOpen, onClick, onContextMenu }: WellMarkerProps) {
   const active = cardOpen;
   const look = lookOf(verdictOf(record, useWellVerdicts()));
   const pinClass = `relative h-auto w-full max-w-none drop-shadow-[0_6px_6px_rgba(0,0,0,0.35)] transition-transform duration-300 ${MOTION} group-hover:-translate-y-1.5 ${
@@ -405,6 +425,7 @@ function WellMarker({ record, corner, size, cardOpen, onClick }: WellMarkerProps
       aria-expanded={active}
       aria-controls={CARD_ID}
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={`group pointer-events-auto absolute cursor-pointer ${active ? 'z-10' : ''}`}
       style={{ left: corner.x, top: corner.y, width: size }}
     >
@@ -679,6 +700,50 @@ function WellDraftMenu({ taskId, at, onImagery, scale, onAdded, onCancel }: { ta
   );
 }
 
+// A well added by hand, right clicked, and where on screen
+interface WellMenuAt {
+  well: MapWell;
+  x: number;
+  y: number;
+}
+
+// Beside a right clicked well added by hand: takes it off the map, asked twice as it cannot be undone (onRemoved with
+// the well once it is off)
+function WellRemoveMenu({ at, scale, onRemoved }: { at: WellMenuAt; scale: number; onRemoved: (well: MapWell) => Promise<void> }) {
+  const [asked, setAsked] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remove = async () => {
+    if (!asked) return setAsked(true);
+    setSending(true);
+    setError(null);
+    try {
+      await removeWell(at.well);
+      await onRemoved(at.well);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+      setSending(false);
+    }
+  };
+  return (
+    <div className="pointer-events-auto absolute" style={{ left: at.x, top: at.y }}>
+      <div role="menu" aria-label={`水井 ${at.well.id}`} className="flex flex-col gap-[10px] bg-[#F7F6F1] p-[14px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]" style={{ zoom: scale }}>
+        <span className="text-[16px] font-bold text-[#6F7468]">手動新增的水井 {at.well.id}</span>
+        <button
+          type="button"
+          role="menuitem"
+          disabled={sending}
+          onClick={remove}
+          className="bg-[#BC5646] px-[22px] py-[8px] text-[20px] font-bold text-[#FBFBF8] transition-[filter] hover:brightness-110 disabled:opacity-60"
+        >
+          {sending ? '刪除中…' : asked ? '確定刪除？無法復原' : '刪除水井'}
+        </button>
+        {error && <span className="max-w-[240px] text-[15px] font-bold text-[#BC5646]">{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Info card ─────────────────────────────────────────────────── */
 
 function InfoRow({ icon, text }: { icon: string; text: string }) {
@@ -896,7 +961,7 @@ function InfoCard({ record, open, viewMode, onViewModeChange }: InfoCardProps) {
 
 interface MapPageProps {
   // the imported map shown, the wells recognised in it (one pin each), and the one selected on arrival (null: none)
-  mapFile: NamedTask;
+  mapFile: NamedTask & Pick<Task, 'created_by_id'>;
   wells: MapWell[];
   imagery: Imagery | null;
   well: MapWell | null;
@@ -953,6 +1018,20 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
   const wellsAddable = imagery !== null && session !== null && canAddWell(session.role);
   const [placing, setPlacing] = useState(false);
   const [draft, setDraft] = useState<GroundClick | null>(null);
+  // a well added by hand can be taken off again by whoever may delete the map's wells (canDelete)
+  const wellsRemovable = session !== null && canDelete(session, { createdById: mapFile.created_by_id });
+  const [wellMenu, setWellMenu] = useState<WellMenuAt | null>(null);
+  // stays the same function, so the map's right click listener is not taken off and put back on every render
+  const openWellMenu = useCallback(
+    (well: MapWell, point: { x: number; y: number }) => {
+      if (!well.manual || !wellsRemovable) return false;
+      setTileMenu(null);
+      setDraft(null);
+      setWellMenu({ well, ...point });
+      return true;
+    },
+    [wellsRemovable],
+  );
   const clickGround = (at: GroundClick) => {
     if (placing) setDraft(at);
     else openTileMenu(at);
@@ -987,6 +1066,7 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
     setCardOpen(false);
     setTileMenu(null);
     setDraft(null);
+    setWellMenu(null);
   }, []);
 
   const togglePlacing = () => {
@@ -1000,6 +1080,16 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
     setPlacing(false);
     setDraft(null);
     selectPin(code);
+  };
+
+  // the well taken off, read again without it: its card (if it was the selected one) closes, the address with it
+  const forgetRemovedWell = async (well: MapWell) => {
+    await readWellsAgain();
+    setWellMenu(null);
+    if (well.id !== selectedId) return;
+    setSelectedId(null);
+    setCardOpen(false);
+    window.history.replaceState(null, '', `/map?record=${encodeURIComponent(mapFile.id)}`);
   };
 
   useEffect(() => {
@@ -1032,7 +1122,10 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
         onDismiss={closeCard}
         placing={placing}
         onGroundClick={clickGround}
+        onPinMenu={openWellMenu}
       />
+
+      {wellMenu && <WellRemoveMenu key={wellMenu.well.id} at={wellMenu} scale={cornerScale} onRemoved={forgetRemovedWell} />}
 
       {placing && (
         <div className="pointer-events-none absolute left-1/2 -translate-x-1/2" style={{ top: CONTENT_TOP }}>

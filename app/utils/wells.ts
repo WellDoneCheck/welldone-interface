@@ -18,6 +18,8 @@ export interface WellView {
   verdict: Verdict | null;
   // the AI's; null for a well added by hand
   confidence: number | null;
+  // found by the AI, or added by hand
+  source: 'ai' | 'manual';
   latitude: number;
   longitude: number;
 }
@@ -37,6 +39,8 @@ export interface MapWell {
   recordId: string;
   verdict: Verdict | null;
   confidence: number | null;
+  // added by hand (and so may be taken off again), not found by the AI
+  manual: boolean;
 }
 
 export function toMapWell(well: WellView, task: Pick<Task, 'created_at'>): MapWell {
@@ -50,6 +54,7 @@ export function toMapWell(well: WellView, task: Pick<Task, 'created_at'>): MapWe
     recordId: well.task_id,
     verdict: well.verdict,
     confidence: well.confidence,
+    manual: well.source === 'manual',
   };
 }
 
@@ -78,6 +83,10 @@ export async function addWell(taskId: string, point: Point): Promise<Pick<WellVi
   await saveVerdict({ id: well.code, wellId: well.id }, 'well');
   return well;
 }
+
+// Takes a well added by hand off its map (an operator only off a map they uploaded: canDelete). Throws the backend's
+// message when it is not taken off.
+export const removeWell = (well: Pick<MapWell, 'wellId'>) => api(`/wells/${well.wellId}`, { method: 'DELETE' });
 
 // Viewers only look (§3)
 export const canAddWell = (role: Role) => role !== 'viewer';
