@@ -15,6 +15,7 @@ import { useRecognisedWells } from './useRecognisedWells';
 import { useCheckLink, usePrefetchCheckView } from './useCheckView';
 import { ButtonIcon, EXPAND_PATH, ExpandedView, ImageButton, MarkerIcon, WellMarkerPin } from './CompareImage';
 import { useCutImagery } from './useCutImagery';
+import { useBackendImage } from './useBackendImage';
 import type { TileState } from '../utils/tileProgress';
 import { pinScaleExpression, pinZoomScale } from '../utils/pinZoomScale';
 import { lastMapZoom, mapCameraFor, mapImageFor, projectWithCamera, rememberMapCamera, rememberMapImage, type MapCamera } from '../utils/mapCamera';
@@ -32,7 +33,6 @@ import CursorCoordinates from './CursorCoordinates';
 import { mapHref } from '../utils/routeRecords';
 import { useWellVerdicts } from './useWellVerdicts';
 import { lookOf, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
-import { fileUrl } from '../utils/api';
 import type { NamedTask } from '../utils/tasks';
 import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
 import { wellImageUrl, type MapWell } from '../utils/wells';
@@ -660,6 +660,7 @@ function AerialPhoto({ well, shared }: { well: MapWell; shared: boolean }) {
 function VerifyLink({ well, shared, markerShown }: { well: MapWell; shared: boolean; markerShown: boolean }) {
   const wellId = well.id;
   const check = useCheckLink(wellId, TO_CHECK);
+  const photo = useBackendImage(wellImageUrl(well, PHOTO_SIZE));
   return (
     <SharedTransition name={SHARED.wellPhoto} enabled={shared}>
       <Link
@@ -669,15 +670,11 @@ function VerifyLink({ well, shared, markerShown }: { well: MapWell; shared: bool
         aria-label={`驗證 ${wellId}：比對多期影像`}
         className="group relative block h-[640px] w-[640px] outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
       >
-        {/* eslint-disable-next-line @next/next/no-img-element -- from the backend, with the token in its address */}
-        <img
-          src={fileUrl(wellImageUrl(well, PHOTO_SIZE))}
-          alt="空拍縮圖"
-          width={PHOTO_SIZE}
-          height={PHOTO_SIZE}
-          // no photo (the well is outside its map's imagery): the card's paper shows instead of a broken image
-          onError={(event) => (event.currentTarget.style.visibility = 'hidden')}
-        />
+        {/* no photo (the well is outside its map's imagery): the card's paper shows instead of a broken image */}
+        {photo && (
+          // eslint-disable-next-line @next/next/no-img-element -- read from the backend with the token's header
+          <img src={photo} alt="空拍縮圖" width={PHOTO_SIZE} height={PHOTO_SIZE} />
+        )}
         {markerShown && <WellMarkerPin />}
         <span
           className={`absolute inset-0 flex items-end justify-center bg-gradient-to-t from-black/60 via-transparent to-transparent pb-8 opacity-0 transition-opacity duration-300 ${MOTION} group-hover:opacity-100 group-focus-visible:opacity-100`}
