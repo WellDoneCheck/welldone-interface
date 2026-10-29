@@ -2,11 +2,13 @@ import Image from 'next/image';
 import type { UserInfo } from './LoginPanel';
 import { SERIF_FONT } from './AccountSubPage';
 import { canManageUsers, ROLE_LABELS } from '../utils/users';
+import { canReadServerLogs } from '../utils/serverLogs';
 
 interface AccountHomeProps {
   userInfo: UserInfo | null;
   onOpenPassword: () => void;
   onOpenUsers: () => void;
+  onOpenLogs: () => void;
   onLogout: () => void;
 }
 
@@ -39,7 +41,7 @@ function MenuButton({ icon, iconWidth, iconHeight, title, description, onClick }
   );
 }
 
-export default function AccountHome({ userInfo, onOpenPassword, onOpenUsers, onLogout }: AccountHomeProps) {
+export default function AccountHome({ userInfo, onOpenPassword, onOpenUsers, onOpenLogs, onLogout }: AccountHomeProps) {
   const role = userInfo?.role ?? 'viewer';
 
   return (
@@ -76,6 +78,16 @@ export default function AccountHome({ userInfo, onOpenPassword, onOpenUsers, onL
             title="用戶管理"
             description="管理所有註冊用戶"
             onClick={onOpenUsers}
+          />
+        )}
+        {canReadServerLogs(role) && (
+          <MenuButton
+            icon="/admin/icon-logs.svg"
+            iconWidth={42}
+            iconHeight={36}
+            title="伺服器日誌"
+            description="即時查看後端與切圖服務的 log"
+            onClick={onOpenLogs}
           />
         )}
       </div>

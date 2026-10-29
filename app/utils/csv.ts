@@ -61,7 +61,12 @@ export function decodeCsv(bytes: ArrayBuffer | Uint8Array): string {
 }
 
 export function downloadCsv(fileName: string, content: string) {
-  const url = URL.createObjectURL(new Blob([content], { type: 'text/csv;charset=utf-8' }));
+  saveFile(fileName, new Blob([content], { type: 'text/csv;charset=utf-8' }));
+}
+
+// Hands the viewer a file to save under the name given
+export function saveFile(fileName: string, file: Blob) {
+  const url = URL.createObjectURL(file);
   const link = document.createElement('a');
   link.href = url;
   link.download = fileName;

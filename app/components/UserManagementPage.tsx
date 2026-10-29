@@ -130,7 +130,8 @@ function RoleTabs({ counts, value, onChange }: { counts: Record<RoleFilter, numb
   );
 }
 
-function SearchBox({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+// label: what is searched, as its placeholder and for screen readers
+export function SearchBox({ value, label, onChange }: { value: string; label: string; onChange: (value: string) => void }) {
   return (
     <label className="flex h-[60px] w-[380px] items-center gap-[12px] bg-[#EEF3F1] px-[18px] focus-within:shadow-[var(--shadow-focus)]">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6F7468" strokeWidth="2.2" strokeLinecap="round" aria-hidden>
@@ -140,8 +141,8 @@ function SearchBox({ value, onChange }: { value: string; onChange: (value: strin
       <input
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="搜尋帳號或姓名"
-        aria-label="搜尋帳號或姓名"
+        placeholder={label}
+        aria-label={label}
         className="min-w-0 flex-1 bg-transparent fs-24 font-normal text-[#2C322F] outline-none placeholder:text-[#8A8E86]"
       />
     </label>
@@ -351,7 +352,7 @@ export default function UserManagementPage({ actor }: { actor: Role }) {
       <div className="mt-[28px] flex items-end justify-between gap-[20px] border-b-2 border-[#ECE9E0]">
         <RoleTabs counts={counts} value={roleFilter} onChange={setRoleFilter} />
         <div className="pb-[12px]">
-          <SearchBox value={query} onChange={setQuery} />
+          <SearchBox value={query} label="搜尋帳號或姓名" onChange={setQuery} />
         </div>
       </div>
 

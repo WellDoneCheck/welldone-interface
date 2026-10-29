@@ -6,6 +6,7 @@ import AccountHome from './AccountHome';
 import LoginForm from './LoginForm';
 import ChangePasswordPage from './ChangePasswordPage';
 import UserManagementPage from './UserManagementPage';
+import ServerLogsPage from './ServerLogsPage';
 import { useFitScale, type FitStage } from './useFitScale';
 import { logIn } from '../utils/auth';
 import type { Role, Session } from '../utils/session';
@@ -15,7 +16,10 @@ export interface UserInfo {
   role: Role;
 }
 
-type View = 'login' | 'user' | 'password' | 'users';
+type View = 'login' | 'user' | 'password' | 'users' | 'logs';
+
+// Pages opened from the account home, which Escape and the back button return to it from
+const isAccountSubPage = (view: View) => view === 'password' || view === 'users' || view === 'logs';
 
 interface LoginPanelProps {
   isOpen: boolean;
@@ -98,7 +102,7 @@ export default function LoginPanel({ isOpen, onClose, notice, session, onLoggedI
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isOpen && !mustChangePassword) {
-        if (view === 'password' || view === 'users') {
+        if (isAccountSubPage(view)) {
           navigateBack();
         } else {
           onClose();
@@ -145,16 +149,16 @@ export default function LoginPanel({ isOpen, onClose, notice, session, onLoggedI
   }, [view]);
 
   const navigateBack = useCallback(() => {
-    if (view === 'password' || view === 'users') {
+    if (isAccountSubPage(view)) {
       switchView('user');
     } else {
       onClose();
     }
   }, [view, switchView, onClose]);
 
-  const isAccountSubPage = view === 'password' || view === 'users';
-  // user management has a table, so its panel is wider than the other account pages
-  const panelMaxW = view === 'login' ? 'max-w-[52.3%]' : view === 'users' ? 'max-w-[72%]' : 'max-w-[48.6%]';
+  const onAccountSubPage = isAccountSubPage(view);
+  // user management has a table and the logs long lines, so their panel is wider than the other account pages
+  const panelMaxW = view === 'login' ? 'max-w-[52.3%]' : view === 'users' || view === 'logs' ? 'max-w-[72%]' : 'max-w-[48.6%]';
   const contentPadding = view === 'login'
     ? { paddingLeft: '23.3%', paddingRight: '15.4%' }
     : { paddingLeft: '11.74%', paddingRight: '3.2%' };
@@ -239,7 +243,7 @@ export default function LoginPanel({ isOpen, onClose, notice, session, onLoggedI
           onClick={navigateBack}
           className="absolute top-[calc(84px*var(--col))] right-[calc(81px*var(--col))] z-10 flex h-[30px] w-[30px] items-center justify-center hover:opacity-60 transition-opacity"
           style={panelContentStyle}
-          aria-label={isAccountSubPage ? '返回' : '關閉登入'}
+          aria-label={onAccountSubPage ? '返回' : '關閉登入'}
         >
           <Image src="/admin/icon-close.svg" alt="" width={30} height={30} />
         </button>}
@@ -286,6 +290,7 @@ export default function LoginPanel({ isOpen, onClose, notice, session, onLoggedI
                 userInfo={{ name: session.username, role: session.role }}
                 onOpenPassword={() => switchView('password')}
                 onOpenUsers={() => switchView('users')}
+                onOpenLogs={() => switchView('logs')}
                 onLogout={handleLogout}
               />
             )}
@@ -305,6 +310,9 @@ export default function LoginPanel({ isOpen, onClose, notice, session, onLoggedI
 
             {/* ===== User Management (root and admin) ===== */}
             {view === 'users' && session && <UserManagementPage actor={session.role} />}
+
+            {/* ===== Server logs (root) ===== */}
+            {view === 'logs' && session && <ServerLogsPage />}
 
           </div>
         </div>
