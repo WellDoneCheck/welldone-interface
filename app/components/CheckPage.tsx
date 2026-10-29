@@ -14,7 +14,7 @@ import { useBackendImage } from './useBackendImage';
 import { canVerify, saveVerdict, verdictOf } from '../utils/wellVerdicts';
 import { rememberVisit } from '../utils/lastVisit';
 import type { CheckView } from '../utils/routeRecords';
-import { wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
+import { confidenceText, wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
 
 // The info column (560 wide: a 72px well id like SW-2023-A005 needs ~530) and the compare panel (film strip + square
 // image, 972 wide and 702 tall) with at least 60px between them, scaled to fit the content area lined up with the navbar
@@ -137,8 +137,9 @@ function WellInfo({ record }: { record: MapWell }) {
         <SharedTransition name={SHARED.wellTime} share={FROM_EXPORT_SHARE}>
           <InfoRow icon="/check/icon-clock.png" text={record.timestamp.slice(0, 16)} />
         </SharedTransition>
+        <InfoRow icon="/check/icon-confidence.svg" text={confidenceText(record.confidence)} />
       </div>
-      <div className="mt-[129px] flex gap-[50px] pl-px">
+      <div className="mt-[36px] flex gap-[50px] pl-px">
         {VERDICTS.map((item) => (
           <VerdictButton
             key={item.verdict}

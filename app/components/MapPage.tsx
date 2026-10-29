@@ -986,7 +986,7 @@ function CardFace({ record, shared, faceMode, viewMode, showing, onViewModeChang
             <SharedTransition name={SHARED.wellTime} enabled={shared}>
               <InfoRow icon="/map/icon-time.png" text={record.timestamp.slice(0, 16)} />
             </SharedTransition>
-            <InfoRow icon="/map/icon-confidence.svg" text={record.confidence === null ? confidenceText(null) : `AI 信心度 ${confidenceText(record.confidence)}`} />
+            <InfoRow icon="/map/icon-confidence.svg" text={confidenceText(record.confidence)} />
           </div>
         </div>
         <CardVerdict record={record} />

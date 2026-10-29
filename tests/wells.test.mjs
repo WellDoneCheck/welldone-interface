@@ -58,7 +58,7 @@ test('a well added by hand is posted to its map and verified as a well, and only
 });
 
 test('the AI\'s confidence shows as a percentage; a well added by hand says so instead', () => {
-  assert.equal(confidenceText(0.9234), '92%');
-  assert.equal(confidenceText(1), '100%');
+  assert.equal(confidenceText(0.9234), 'AI 信心度 92%');
+  assert.equal(confidenceText(1), 'AI 信心度 100%');
   assert.equal(confidenceText(null), '人工標記');
 });

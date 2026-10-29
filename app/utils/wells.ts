@@ -58,8 +58,8 @@ export function toMapWell(well: WellView, task: Pick<Task, 'created_at'>): MapWe
   };
 }
 
-// How sure the AI was that it is a well, as the site writes it ('92%'); a well added by hand was not the AI's
-export const confidenceText = (confidence: number | null) => (confidence === null ? '人工標記' : `${Math.round(confidence * 100)}%`);
+// How sure the AI was that it is a well, as the site writes it ('AI 信心度 92%'); a well added by hand was not the AI's
+export const confidenceText = (confidence: number | null) => (confidence === null ? '人工標記' : `AI 信心度 ${Math.round(confidence * 100)}%`);
 
 type Point = Pick<MapWell, 'latitude' | 'longitude'>;
 
