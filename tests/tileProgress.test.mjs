@@ -4,10 +4,12 @@ import {
   countStates,
   cutImagery,
   keepReading,
+  lngLatToMercator,
   mercatorToLngLat,
   aiFinished,
   readTileProgress,
   recognisedCount,
+  recognisedTileAt,
   recognitionFeatures,
   uncutFeatures,
 } from '../app/utils/tileProgress.ts';
@@ -125,6 +127,23 @@ test('a map being cut shows the cells not cut yet, the imagery cut so far and th
   assert.equal((await readTileProgress('t1')).again, false);
 });
 
+test('longitude and latitude become EPSG:3857 metres again', () => {
+  const [e, n] = lngLatToMercator(...mercatorToLngLat(1234.5, 6789.25));
+  near(e, 1234.5);
+  near(n, 6789.25);
+});
+
+test('the tile the AI has recognised under a point on the ground, none where it has not', () => {
+  // tile (0,1) covers E 1200–1400, N 4800–5000; (0,0) E 1000–1200
+  const progress = ai('completed', [[0, 1, 'done'], [0, 0, 'failed']]);
+  assert.deepEqual(recognisedTileAt(grid, progress, ...mercatorToLngLat(1300, 4900)), { row: 0, col: 1 });
+  assert.equal(recognisedTileAt(grid, progress, ...mercatorToLngLat(1100, 4900)), null);
+  // (1,0) not started on: waiting, not recognised
+  assert.equal(recognisedTileAt(grid, progress, ...mercatorToLngLat(1100, 4700)), null);
+  // off the grid
+  assert.equal(recognisedTileAt(grid, progress, ...mercatorToLngLat(900, 4900)), null);
+});
+
 test('a cut map shows the tiles still to recognise and how many are recognised', async () => {
   backend({ '/tasks/t1': task('completed'), '/tasks/t1/tiles/cut': grid, '/tasks/t1/ai/progress': ai('processing', [[0, 0, 'done'], [0, 1, 'processing']]) });
   const { progress, again } = await readTileProgress('t1');
@@ -132,5 +151,6 @@ test('a cut map shows the tiles still to recognise and how many are recognised',
   assert.equal(progress.recognised, 1);
   assert.equal(progress.imagery, null);
   assert.equal(progress.retryable, false);
+  assert.deepEqual(progress.recognisedTileAt(...mercatorToLngLat(1100, 4900)), { row: 0, col: 0 });
   assert.equal(again, true);
 });

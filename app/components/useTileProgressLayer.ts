@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ExpressionSpecification, GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
-import { countStates, readTileProgress, type TileProgress, type TileState } from '../utils/tileProgress';
+import { countStates, NO_TILE, readTileProgress, type TileProgress, type TileState } from '../utils/tileProgress';
 
 // How often the tiles are read again while the map is cut or recognised, and how long the tiles the AI is at take to
 // fade in or out (they pulse)
@@ -115,6 +115,8 @@ export interface TileProgressLayer {
   retryable: boolean;
   // the tile waiting to be recognised under a point on the map, if any
   pendingTileAt: (point: { x: number; y: number }) => { row: number; col: number } | null;
+  // the tile the AI has recognised under a point on the ground (longitude, latitude), if any
+  recognisedTileAt: TileProgress['recognisedTileAt'];
   // reads the tiles again from the start (they are no longer read once the AI has finished)
   readAgain: () => void;
 }
@@ -166,6 +168,7 @@ export function useTileProgressLayer(map: MapLibreMap | null, taskId: string): T
     imagery: progress?.imagery ?? null,
     retryable: progress?.retryable ?? false,
     pendingTileAt,
+    recognisedTileAt: progress?.recognisedTileAt ?? NO_TILE,
     readAgain,
   };
 }

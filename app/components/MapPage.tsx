@@ -34,7 +34,7 @@ import CursorCoordinates from './CursorCoordinates';
 import { mapHref } from '../utils/routeRecords';
 import { useWellVerdicts } from './useWellVerdicts';
 import { canVerify, lookOf, saveVerdict, VERDICT_COLOR, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
-import { canDelete, canRetry, retryRecognition, type NamedTask, type Task } from '../utils/tasks';
+import { canClearRecognition, canDelete, canRetry, clearRecognition, retryRecognition, type NamedTask, type Task } from '../utils/tasks';
 import { useSiteChrome } from './SiteChrome';
 import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
 import { addWell, canAddWell, confidenceText, coordinatesText, isOnImagery, removeWell, wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
@@ -239,11 +239,13 @@ interface MapCanvasProps {
   onGroundClick: (at: GroundClick) => void;
   // a right click on a well's pin, where it was on screen: true when it opens a menu of the page's (not the browser's)
   onPinMenu: (well: MapWell, point: { x: number; y: number }) => boolean;
+  // a right click on the map off the pins, where it was on screen and on the ground: true as for onPinMenu
+  onGroundMenu: (at: { x: number; y: number; longitude: number; latitude: number }) => boolean;
 }
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, placing, onGroundClick, onPinMenu }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, placing, onGroundClick, onPinMenu, onGroundMenu }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -326,19 +328,20 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
     };
   }, [map, placing]);
 
-  // a right click on a pin the map drew: its menu, instead of the browser's
+  // a right click on a pin the map drew, or off the pins: the page's menu there, instead of the browser's
   useEffect(() => {
     if (!map) return;
     const onContextMenu = (event: MapMouseEvent) => {
       const id = iconAt(map, WELL_LAYER, event.point, 'id');
       const well = wells.find((candidate) => candidate.id === id);
-      if (well && onPinMenu(well, event.point)) event.originalEvent.preventDefault();
+      const opened = well ? onPinMenu(well, event.point) : onGroundMenu({ ...event.point, longitude: event.lngLat.lng, latitude: event.lngLat.lat });
+      if (opened) event.originalEvent.preventDefault();
     };
     map.on('contextmenu', onContextMenu);
     return () => {
       map.off('contextmenu', onContextMenu);
     };
-  }, [map, wells, onPinMenu]);
+  }, [map, wells, onPinMenu, onGroundMenu]);
 
   // a click on the map: on a pin it drew, that pin (unless placing); anywhere else, closes the card
   function onMapClick(event: MapMouseEvent) {
@@ -601,23 +604,34 @@ function LeaderLine({ map, record, scale }: { map: MapLibreMap; record: MapWell;
   );
 }
 
-// A tile waiting to be recognised, clicked once the AI has finished, and where on screen
+type TileCell = { row: number; col: number };
+
+// What can be done to a tile once the AI has finished: one waiting to be recognised (clicked) is sent to it again, one it
+// has recognised (right clicked, by an admin) has its results cleared, so it waits to be recognised again
+const TILE_ACTIONS = {
+  retry: { title: '等待辨識的小圖', note: null, label: '辨識', color: '#62A4A7', run: (taskId: string, cell: TileCell) => retryRecognition(taskId, [cell]) },
+  clear: { title: '已辨識的小圖', note: '這格 AI 找到的水井（含已驗證的）會刪除，手動標記的保留', label: '清除辨識結果', color: '#BC5646', run: clearRecognition },
+};
+
+// A tile clicked once the AI has finished, what can be done to it, and where on screen
 interface TileMenuAt {
-  cell: { row: number; col: number };
+  cell: TileCell;
+  action: keyof typeof TILE_ACTIONS;
   x: number;
   y: number;
 }
 
-// Beside a clicked tile waiting to be recognised: sends that tile alone to the AI again (onRetried once it has gone)
-function TileRetryMenu({ taskId, at, scale, onRetried }: { taskId: string; at: TileMenuAt; scale: number; onRetried: () => void }) {
+// Beside a clicked tile: does its action to that tile alone (onDone once it has)
+function TileMenu({ taskId, at, scale, onDone }: { taskId: string; at: TileMenuAt; scale: number; onDone: () => void }) {
+  const { title, note, label, color, run } = TILE_ACTIONS[at.action];
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const retry = async () => {
+  const send = async () => {
     setSending(true);
     setError(null);
     try {
-      await retryRecognition(taskId, [at.cell]);
-      onRetried();
+      await run(taskId, at.cell);
+      onDone();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
       setSending(false);
@@ -631,14 +645,16 @@ function TileRetryMenu({ taskId, at, scale, onRetried }: { taskId: string; at: T
         className="flex flex-col gap-[10px] bg-[#F7F6F1] p-[14px] shadow-[0_4px_20px_8px_rgba(0,0,0,0.5)]"
         style={{ zoom: scale }}
       >
-        <span className="text-[16px] font-bold text-[#6F7468]">等待辨識的小圖</span>
+        <span className="text-[16px] font-bold text-[#6F7468]">{title}</span>
+        {note && <span className="max-w-[240px] text-[15px] text-[#6F7468]">{note}</span>}
         <button
           type="button"
           disabled={sending}
-          onClick={retry}
-          className="bg-[#62A4A7] px-[22px] py-[8px] text-[20px] font-bold text-[#FBFBF8] transition-[filter] hover:brightness-110 disabled:opacity-60"
+          onClick={send}
+          className="px-[22px] py-[8px] text-[20px] font-bold text-[#FBFBF8] transition-[filter] hover:brightness-110 disabled:opacity-60"
+          style={{ backgroundColor: color }}
         >
-          {sending ? '送出中…' : '辨識'}
+          {sending ? '送出中…' : label}
         </button>
         {error && <span className="max-w-[240px] text-[15px] font-bold text-[#BC5646]">{error}</span>}
       </div>
@@ -1088,7 +1104,7 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
   const [tileMenu, setTileMenu] = useState<TileMenuAt | null>(null);
   const openTileMenu = (point: { x: number; y: number }) => {
     const cell = tilesRetriable ? tiles.pendingTileAt(point) : null;
-    if (cell) setTileMenu({ cell, ...point });
+    if (cell) setTileMenu({ cell, action: 'retry', ...point });
   };
   // a well can be placed by hand on the map's imagery, by an operator or admin: the next click on the map places it
   const wellsAddable = imagery !== null && session !== null && canAddWell(session.role);
@@ -1107,6 +1123,20 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
       return true;
     },
     [wellsRemovable],
+  );
+  // and a tile it has recognised can have its results cleared then, by an admin (a right click on it)
+  const recognitionClearable = tiles.retryable && session !== null && canClearRecognition(session.role);
+  const { recognisedTileAt } = tiles;
+  const openClearMenu = useCallback(
+    (at: { x: number; y: number; longitude: number; latitude: number }) => {
+      const cell = recognitionClearable ? recognisedTileAt(at.longitude, at.latitude) : null;
+      if (!cell) return false;
+      setWellMenu(null);
+      setDraft(null);
+      setTileMenu({ cell, action: 'clear', x: at.x, y: at.y });
+      return true;
+    },
+    [recognitionClearable, recognisedTileAt],
   );
   const clickGround = (at: GroundClick) => {
     if (placing) setDraft(at);
@@ -1199,6 +1229,7 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
         placing={placing}
         onGroundClick={clickGround}
         onPinMenu={openWellMenu}
+        onGroundMenu={openClearMenu}
       />
 
       {wellMenu && <WellRemoveMenu key={wellMenu.well.id} at={wellMenu} scale={cornerScale} onRemoved={forgetRemovedWell} />}
@@ -1224,14 +1255,15 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
       )}
 
       {tileMenu && (
-        <TileRetryMenu
-          key={`${tileMenu.cell.row}/${tileMenu.cell.col}`}
+        <TileMenu
+          key={`${tileMenu.action}/${tileMenu.cell.row}/${tileMenu.cell.col}`}
           taskId={mapFile.id}
           at={tileMenu}
           scale={cornerScale}
-          onRetried={() => {
+          onDone={() => {
             setTileMenu(null);
             tiles.readAgain();
+            if (tileMenu.action === 'clear') void readWellsAgain();
           }}
         />
       )}

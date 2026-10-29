@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { canDelete, canRename, canRetry, canUpload, displayName, givenName, importName, groupByYear, isFinished, pickMapTask, renameTask, retryRecognition, toRecord, uploadError } from '../app/utils/tasks.ts';
+import { canClearRecognition, canDelete, canRename, canRetry, canUpload, clearRecognition, displayName, givenName, importName, groupByYear, isFinished, pickMapTask, renameTask, retryRecognition, toRecord, uploadError } from '../app/utils/tasks.ts';
 
 const task = (split_status, ai_status, extra = {}) => ({
   id: 'task-1',
@@ -131,6 +131,20 @@ test('a retry sends every failed and unreached tile (no body), or only the tiles
   assert.equal(canRetry('operator'), true);
   assert.equal(canRetry('admin'), true);
   assert.equal(canRetry('viewer'), false);
+});
+
+test('a recognised tile has its results cleared, by an admin or root only', async () => {
+  const sent = [];
+  globalThis.fetch = async (url, init) => {
+    sent.push({ path: new URL(url).pathname, method: init.method });
+    return new Response('{"removedWellCount":3}', { status: 200 });
+  };
+  await clearRecognition('task-1', { row: 2, col: 1 });
+  assert.deepEqual(sent, [{ path: '/tasks/task-1/ai/tiles/2/1', method: 'DELETE' }]);
+  assert.equal(canClearRecognition('root'), true);
+  assert.equal(canClearRecognition('admin'), true);
+  assert.equal(canClearRecognition('operator'), false);
+  assert.equal(canClearRecognition('viewer'), false);
 });
 
 test('failed and finished tasks are no longer polled', () => {

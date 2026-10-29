@@ -181,6 +181,11 @@ export function toRecord(task: Task, progress?: TaskProgress, now = Date.now()):
 export const retryRecognition = (taskId: string, tiles?: { row: number; col: number }[]) =>
   api(`/tasks/${encodeURIComponent(taskId)}/ai/retry`, { method: 'POST', body: tiles && { tiles } });
 
+// Takes a recognised tile's results off, so it waits to be recognised (and can be sent to the AI) again: the wells the AI
+// found there go, verified or not; wells placed by hand stay
+export const clearRecognition = (taskId: string, { row, col }: { row: number; col: number }) =>
+  api(`/tasks/${encodeURIComponent(taskId)}/ai/tiles/${row}/${col}`, { method: 'DELETE' });
+
 export interface YearGroup {
   year: string;
   records: TaskRecord[];
@@ -209,6 +214,7 @@ export function uploadError(file: Pick<File, 'name'>): string | null {
 export const canUpload = (role: Role) => role !== 'viewer';
 export const canRename = (role: Role) => role !== 'viewer';
 export const canRetry = (role: Role) => role !== 'viewer';
+export const canClearRecognition = (role: Role) => role === 'root' || role === 'admin';
 export function canDelete(session: Pick<Session, 'role' | 'userId'>, record: Pick<TaskRecord, 'createdById'>): boolean {
   if (session.role === 'root' || session.role === 'admin') return true;
   return session.role === 'operator' && record.createdById === session.userId;

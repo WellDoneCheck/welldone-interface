@@ -50,6 +50,11 @@ export function mercatorToLngLat(e: number, n: number): [number, number] {
   return [(e / EARTH_RADIUS) * DEGREES, (2 * Math.atan(Math.exp(n / EARTH_RADIUS)) - Math.PI / 2) * DEGREES];
 }
 
+// [longitude, latitude] to EPSG:3857 metres
+export function lngLatToMercator(lng: number, lat: number): [number, number] {
+  return [(lng / DEGREES) * EARTH_RADIUS, Math.log(Math.tan(Math.PI / 4 + lat / DEGREES / 2)) * EARTH_RADIUS];
+}
+
 // A tile's whole square, an edge tile's too, as a closed ring of [longitude, latitude]
 function tileSquare({ geoTransform: [originE, pixelWidth, , originN, , pixelHeight], tileSize }: TileGrid, row: number, col: number) {
   const point = (px: number, py: number) => mercatorToLngLat(originE + px * pixelWidth, originN + py * pixelHeight);
@@ -108,6 +113,14 @@ export function recognitionFeatures(grid: TileGrid, progress: AiTileProgress): T
   return tileFeatures(grid, open);
 }
 
+// The tile the AI has recognised under a point on the ground (longitude, latitude), if any
+export function recognisedTileAt(grid: TileGrid, progress: AiTileProgress, lng: number, lat: number): Cell | null {
+  const [originE, pixelWidth, , originN, , pixelHeight] = grid.geoTransform;
+  const [e, n] = lngLatToMercator(lng, lat);
+  const cell = { row: Math.floor((n - originN) / pixelHeight / grid.tileSize), col: Math.floor((e - originE) / pixelWidth / grid.tileSize) };
+  return progress.tiles.some((tile) => tile.status === 'done' && cellKey(tile) === cellKey(cell)) ? cell : null;
+}
+
 // The imagery cut so far, as the map shows an imported map's
 export function cutImagery(grid: TileGrid): Imagery | null {
   return grid.imagery && { ...grid.imagery, bounds: grid.bounds };
@@ -143,7 +156,11 @@ export interface TileProgress {
   imagery: Imagery | null;
   // the tiles left open can be sent to the AI again (aiFinished)
   retryable: boolean;
+  // the tile the AI has recognised under a point on the ground (none while cutting)
+  recognisedTileAt: (lng: number, lat: number) => Cell | null;
 }
+
+export const NO_TILE = () => null;
 
 // The map's tiles as they are now (null: nothing to draw yet, not being cut), and whether to read them again: while
 // it waits to be cut or is being cut, and while the AI has tiles left (keepReading)
@@ -152,11 +169,18 @@ export async function readTileProgress(taskId: string): Promise<{ progress: Tile
   if (split === 'waiting') return { progress: null, again: true };
   if (split !== 'completed') {
     const grid = await fetchTileGrid(taskId);
-    const progress = { features: uncutFeatures(grid), recognised: null, bounds: grid.bounds, imagery: cutImagery(grid), retryable: false };
+    const progress = { features: uncutFeatures(grid), recognised: null, bounds: grid.bounds, imagery: cutImagery(grid), retryable: false, recognisedTileAt: NO_TILE };
     return { progress, again: split === 'active' };
   }
   const [grid, ai] = await Promise.all([fetchTileGrid(taskId), fetchAiTiles(taskId)]);
   const features = recognitionFeatures(grid, ai);
-  const progress = { features, recognised: recognisedCount(ai), bounds: grid.bounds, imagery: null, retryable: aiFinished(ai) };
+  const progress = {
+    features,
+    recognised: recognisedCount(ai),
+    bounds: grid.bounds,
+    imagery: null,
+    retryable: aiFinished(ai),
+    recognisedTileAt: (lng: number, lat: number) => recognisedTileAt(grid, ai, lng, lat),
+  };
   return { progress, again: keepReading(ai, features) };
 }
