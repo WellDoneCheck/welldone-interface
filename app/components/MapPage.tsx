@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -19,7 +19,7 @@ import { useCutImagery } from './useCutImagery';
 import { useBackendImage } from './useBackendImage';
 import type { TileState } from '../utils/tileProgress';
 import { pinScaleExpression, pinZoomScale } from '../utils/pinZoomScale';
-import { popDelay, popDuration, poppingIds } from '../utils/pinPop';
+import { popDelay, popDuration, popOrder, unsettledIds } from '../utils/pinPop';
 import { lastMapZoom, mapCameraFor, mapImageFor, projectWithCamera, rememberMapCamera, rememberMapImage, type MapCamera } from '../utils/mapCamera';
 import SharedTransition, {
   BACK_TO_UPLOAD,
@@ -196,30 +196,55 @@ function usePinIconUrls(): Record<string, string> | null {
 const wellFeatures = (wells: MapWell[], verdicts: ReturnType<typeof useWellVerdicts>) =>
   pointFeatures(wells, (well) => ({ id: well.id, look: lookOf(verdictOf(well, verdicts)) }));
 
-const NO_PINS: string[] = [];
+// Room around the map within which a pin coming onto it still pops in (one standing just outside, reaching in)
+const POP_SCREEN_MARGIN = PIN_SIZE;
 
-// The pins just come onto the map (all of them as the map first shows them, coming back from a check page too; later
-// only new ones, e.g. a well placed by hand): page elements popping in one after another. Gives back those and the ones
-// left out of the map's layer: all of them until the last has landed, then none, the page elements staying until the
-// map has drawn them (it lays its pins out again first: going at once, they would be gone for a few frames)
-function usePoppingPins(map: MapLibreMap | null, ready: boolean, wells: MapWell[]): { popping: string[]; hidden: string[] } {
-  const shown = useRef<Set<string> | null>(null);
+// The pins of the wells left out of the map's layer (hidden), split by popOrder: those on screen in the order they pop
+// in, spreading out from the focused well (or the map's middle), and those off it
+function popBatch(map: MapLibreMap, wells: MapWell[], hidden: string[], focusId: string | null) {
+  const container = map.getContainer();
+  const pins = wells.filter((well) => hidden.includes(well.id)).map((well) => ({ id: well.id, ...map.project([well.longitude, well.latitude]) }));
+  const focus = pins.find((pin) => pin.id === focusId) ?? { x: container.clientWidth / 2, y: container.clientHeight / 2 };
+  return popOrder(pins, focus, { width: container.clientWidth, height: container.clientHeight }, POP_SCREEN_MARGIN);
+}
+
+// The pins popping in: page elements, one after another, for those the map's layer does not draw yet (all of them at
+// first, coming back from a check page too; later only new ones, e.g. a well placed by hand). Only while the map is
+// drawn and at rest: until it has drawn itself a picture of it may stand in, the pins in it; while it moves (fitted to
+// the imagery, the camera put back…) where a pin is on screen is not where it will be, and one counted off screen would
+// come in unpopped. Gives back those popping in and those left out of the layer: each from the render it comes in
+// (never drawn by the map for a frame first), until it has landed; the page elements then stay until the map has drawn
+// them (it lays its pins out again first: going at once, they would be gone for a few frames).
+function usePoppingPins(map: MapLibreMap | null, ready: boolean, wells: MapWell[], focusId: string | null): { popping: string[]; hidden: string[] } {
+  const [restingOn, setRestingOn] = useState<MapLibreMap | null>(null);
+  // the pins the map's layer draws
+  const [settled, setSettled] = useState<ReadonlySet<string>>(() => new Set());
   const [popping, setPopping] = useState<string[]>([]);
-  const [landed, setLanded] = useState(false);
+  const hidden = useMemo(() => unsettledIds(wells.map((well) => well.id), settled), [wells, settled]);
+  const atRest = map !== null && restingOn === map;
+  const landed = popping.length > 0 && popping.every((id) => settled.has(id));
+  // those come in while others are popping in go once these have
+  if (map && atRest && hidden.length && !popping.length) {
+    const { onScreen, offScreen } = popBatch(map, wells, hidden, focusId);
+    if (onScreen.length) setPopping(onScreen);
+    if (offScreen.length) setSettled((before) => new Set([...before, ...offScreen]));
+  }
 
   useEffect(() => {
-    if (!ready) return;
-    const ids = wells.map((well) => well.id);
-    const appeared = poppingIds(shown.current, ids);
-    shown.current = new Set(ids);
-    if (!appeared.length) return;
-    setPopping(appeared);
-    setLanded(false);
-  }, [ready, wells]);
+    if (!ready || !map) return;
+    const rest = () => setRestingOn(map);
+    const move = () => setRestingOn(null);
+    map.on('idle', rest);
+    map.on('movestart', move);
+    return () => {
+      map.off('idle', rest);
+      map.off('movestart', move);
+    };
+  }, [ready, map]);
 
   useEffect(() => {
     if (!popping.length) return;
-    const timer = setTimeout(() => setLanded(true), popDuration(popping.length));
+    const timer = setTimeout(() => setSettled((before) => new Set([...before, ...popping])), popDuration(popping.length));
     return () => clearTimeout(timer);
   }, [popping]);
 
@@ -233,7 +258,66 @@ function usePoppingPins(map: MapLibreMap | null, ready: boolean, wells: MapWell[
     };
   }, [map, landed]);
 
-  return { popping, hidden: landed ? NO_PINS : popping };
+  return { popping, hidden };
+}
+
+const REST_IMAGE_LAYER = 'rest-image';
+
+// A picture of the map each time it comes to rest, without its pins: drawn by a layer of the map's just under the pins,
+// which copies the map drawn so far. Coming back from a well's check page it stands in for the map until that has
+// started, and the pins then all pop in over it (with the pins in it, those would be there first). The canvas can only
+// be read while it is drawn, so one more draw is asked for once the map is still; not while it moves (reading it makes
+// the page wait for the graphics card, a hitch on every read).
+function useRestImageUnderPins(map: MapLibreMap | null, onImage: ((image: Blob) => void) | null) {
+  const callback = useRef(onImage);
+  useEffect(() => {
+    callback.current = onImage;
+  });
+  const wanted = onImage !== null;
+  useEffect(() => {
+    if (!map || !wanted) return;
+    // asked: the next draw is copied; copied: the last one was (so the idle that follows it asks for no other)
+    let asked = false;
+    let copied = false;
+    const copy = () => {
+      const canvas = map.getCanvas();
+      const picture = document.createElement('canvas');
+      picture.width = canvas.clientWidth;
+      picture.height = canvas.clientHeight;
+      picture.getContext('2d')!.drawImage(canvas, 0, 0, picture.width, picture.height);
+      picture.toBlob((image) => image && callback.current?.(image), 'image/webp', 0.85);
+    };
+    const addLayer = () => {
+      if (map.getLayer(REST_IMAGE_LAYER) || !map.getLayer(WELL_LAYER)) return;
+      map.addLayer(
+        {
+          id: REST_IMAGE_LAYER,
+          type: 'custom',
+          render: () => {
+            if (!asked) return;
+            asked = false;
+            copied = true;
+            copy();
+          },
+        },
+        WELL_LAYER,
+      );
+    };
+    const onIdle = () => {
+      addLayer();
+      if (copied) {
+        copied = false;
+        return;
+      }
+      asked = true;
+      map.triggerRepaint();
+    };
+    map.on('idle', onIdle);
+    return () => {
+      map.off('idle', onIdle);
+      if (map.getLayer(REST_IMAGE_LAYER)) map.removeLayer(REST_IMAGE_LAYER);
+    };
+  }, [map, wanted]);
 }
 
 // The map's layer of pins: every well but the selected one and those popping in (page elements), at the page's scale
@@ -251,7 +335,7 @@ function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: 
     if (ready && map) (map.getSource(WELL_LAYER) as GeoJSONSource).setData(wellFeatures(wells, verdicts));
   }, [ready, map, wells, verdicts]);
 
-  const { popping, hidden } = usePoppingPins(map, ready, wells);
+  const { popping, hidden } = usePoppingPins(map, ready, wells, selectedId);
   useEffect(() => {
     if (ready && map) map.setFilter(WELL_LAYER, ['!', ['in', ['get', 'id'], ['literal', [selectedId ?? '', ...hidden]]]]);
   }, [ready, map, selectedId, hidden]);
@@ -335,8 +419,6 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
     // the whole imagery; while there is none yet the area it is being cut from, or Taiwan
     fit: stripFit(imagery?.bounds ?? area ?? TAIWAN_BOUNDS, viewport, startsWithCard),
     camera,
-    // a picture of where the map is left with a well, for coming back to it from its check page
-    onRestImage: selectedId ? (image) => rememberMapImage(selectedId, image) : undefined,
     placeholder: startImage ?? undefined,
     startAfter: startImage ? RETURN_MAP_START_MS : openedFromUpload ? OPEN_MAP_START_MS : 0,
     onMapClick: (event) => onMapClick(event),
@@ -359,7 +441,10 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const poppingWellIds = useWellPinLayer(map, wells, selectedId ?? null, scale, !placing, setHoveredId);
-  const popping = wells.filter((well) => well.id !== selectedId && poppingWellIds.includes(well.id));
+  // a picture of where the map is left with a well, for coming back to it from its check page
+  useRestImageUnderPins(map, selectedId ? (image) => rememberMapImage(selectedId, image) : null);
+  // in the order they pop in (the selected one, first, is a page element of its own)
+  const popping = poppingWellIds.flatMap((id) => (id === selectedId ? [] : wells.filter((well) => well.id === id)));
   const pinIconUrls = usePinIconUrls();
   // under the map's shade, as the map's own pins are, so they look the same before and after they land
   const underShade = useUnderMapShade();
@@ -440,14 +525,14 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
         createPortal(
           <PinOverlay map={map}>
             {(project) =>
-              popping.map((well, index) => (
+              popping.map((well) => (
                 <PoppingPin
                   key={well.id}
                   well={well}
                   iconUrls={pinIconUrls}
                   corner={pinCorner(well, project, pinScaleOn(map, scale))}
                   pinScale={pinScaleOn(map, scale)}
-                  delay={popDelay(index, popping.length)}
+                  delay={popDelay(poppingWellIds.indexOf(well.id), poppingWellIds.length)}
                 />
               ))
             }
@@ -465,6 +550,7 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
                   corner={pinCorner(selected, project, pinScaleOn(map, scale))}
                   size={PIN_SIZE * pinScaleOn(map, scale)}
                   cardOpen={cardOpen}
+                  popIn={poppingWellIds.includes(selected.id)}
                   onClick={() => pickPin(selected)}
                   onContextMenu={(event) => {
                     if (onPinMenu(selected, { x: event.clientX, y: event.clientY })) event.preventDefault();
@@ -510,13 +596,18 @@ interface WellMarkerProps {
   corner: { x: number; y: number };
   size: number;
   cardOpen: boolean;
+  // popping in with the map's pins as the map first shows them (not when a pin is picked later)
+  popIn?: boolean;
   onClick: () => void;
   onContextMenu?: (event: ReactMouseEvent) => void;
 }
 
+// A pin coming onto the map (pin-pop in globals.css, PIN_POP_MS long)
+const PIN_POP_ANIMATION = 'animate-[pin-pop_600ms_ease-out_both] motion-reduce:animate-none';
+
 // The selected well's pin, a page element (the others are drawn by the map); clicking it toggles its card. Coloured
 // by its verification as the map's pins are: the pin image itself while not verified, its shape filled otherwise.
-function WellMarker({ record, corner, size, cardOpen, onClick, onContextMenu }: WellMarkerProps) {
+function WellMarker({ record, corner, size, cardOpen, popIn = false, onClick, onContextMenu }: WellMarkerProps) {
   const active = cardOpen;
   const look = lookOf(verdictOf(record, useWellVerdicts()));
   const pinClass = `relative h-auto w-full max-w-none drop-shadow-[0_6px_6px_rgba(0,0,0,0.35)] transition-transform duration-300 ${MOTION} group-hover:-translate-y-1.5 ${
@@ -539,24 +630,26 @@ function WellMarker({ record, corner, size, cardOpen, onClick, onContextMenu }: 
       )}
       {/* the well's id above the pin on hover */}
       <span className={`${PIN_LABEL} opacity-0 transition-opacity duration-200 group-hover:opacity-100`}>{record.id}</span>
-      {look === 'pending' ? (
-        <Image
-          src="/map/pin.png"
-          alt=""
-          width={90}
-          height={90}
-          // not dragged off as an image: the pin stays put on the map
-          draggable={false}
-          className={pinClass}
-        />
-      ) : (
-        <span className={`block aspect-square ${pinClass}`}>
-          <span
-            className="absolute inset-0 [mask-image:url(/map/pin.png)] [mask-size:100%_100%]"
-            style={{ backgroundColor: VERDICT_COLOR[look] }}
+      <span className={`block origin-[50%_85%] ${popIn ? PIN_POP_ANIMATION : ''}`}>
+        {look === 'pending' ? (
+          <Image
+            src="/map/pin.png"
+            alt=""
+            width={90}
+            height={90}
+            // not dragged off as an image: the pin stays put on the map
+            draggable={false}
+            className={pinClass}
           />
-        </span>
-      )}
+        ) : (
+          <span className={`block aspect-square ${pinClass}`}>
+            <span
+              className="absolute inset-0 [mask-image:url(/map/pin.png)] [mask-size:100%_100%]"
+              style={{ backgroundColor: VERDICT_COLOR[look] }}
+            />
+          </span>
+        )}
+      </span>
     </button>
   );
 }
@@ -585,7 +678,7 @@ function PoppingPin({ well, iconUrls, corner, pinScale, delay }: PoppingPinProps
       src={iconUrls[PIN_IMAGE[look]]}
       alt=""
       draggable={false}
-      className="absolute max-w-none animate-[pin-pop_600ms_ease-out_both] motion-reduce:animate-none"
+      className={`absolute max-w-none ${PIN_POP_ANIMATION}`}
       style={{
         left: corner.x - PIN_SHADOW_ROOM * pinScale,
         top: corner.y - PIN_SHADOW_ROOM * pinScale,

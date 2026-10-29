@@ -344,8 +344,6 @@ interface TileMapProps {
   children?: (view: MapView) => ReactNode;
   // the map once it has started, for a page drawing over it from elsewhere (with useMapProject)
   onReady?: (map: MapLibreMap) => void;
-  // a picture of the map (with what it draws itself, e.g. pins) each time it comes to rest
-  onRestImage?: (image: Blob) => void;
   // shown where the map will be until it has drawn itself (e.g. a picture of it from before), and how long to wait
   // before starting it: a page arriving with a transition keeps the work of starting the map out of its frames
   placeholder?: string;
@@ -362,7 +360,6 @@ export default function TileMap({
   className = '',
   children,
   onReady,
-  onRestImage,
   placeholder,
   startAfter = 0,
 }: TileMapProps) {
@@ -472,12 +469,6 @@ export default function TileMap({
   }, [map, onReady]);
 
   useLogoBackdrop(map, containerRef);
-  useDrawnAtRest(
-    map,
-    onRestImage
-      ? () => map?.getCanvas().toBlob((image) => image && onRestImage(image), 'image/webp', 0.85)
-      : null,
-  );
 
   return (
     // isolate: what is drawn over the map (e.g. a raised pin) stays under the page's cards and panels

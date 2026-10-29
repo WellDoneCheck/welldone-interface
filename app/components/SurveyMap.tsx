@@ -23,7 +23,6 @@ export interface SurveyMapSettings {
   placeholder?: string;
   startAfter?: number;
   onMapClick?: (event: MapMouseEvent) => void;
-  onRestImage?: (image: Blob) => void;
 }
 
 interface SurveyMapState {
