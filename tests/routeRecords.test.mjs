@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadCheckView, loadMapView, mapHref, resolveMapWell } from '../app/utils/routeRecords.ts';
+import { loadCheckView, loadMapView, mapHref, neighbourCodes, resolveMapWell } from '../app/utils/routeRecords.ts';
 
 /* ─── Map page ──────────────────────────────────────────────────── */
 
@@ -69,6 +69,7 @@ test('check: a well is read by its code, with its map and its captures in every 
   backend({
     '/wells/code/SW-2026-A002': wellView(2, 'SW-2026-A002'),
     '/tasks/done': backendTask('done', 'completed'),
+    '/wells?taskId=done': [wellView(2, 'SW-2026-A002')],
     '/wells/2/timeline': timeline,
   });
   const view = await loadCheckView('SW-2026-A002');
@@ -81,7 +82,7 @@ test('check: a well is read by its code, with its map and its captures in every 
 });
 
 test('check: the way back is to the well in its map, with its card already open', async () => {
-  backend({ '/wells/code/SW-2026-A002': wellView(2, 'SW-2026-A002'), '/tasks/done': backendTask('done', 'completed'), '/wells/2/timeline': timeline });
+  backend({ '/wells/code/SW-2026-A002': wellView(2, 'SW-2026-A002'), '/tasks/done': backendTask('done', 'completed'), '/wells?taskId=done': [], '/wells/2/timeline': timeline });
   const view = await loadCheckView('SW-2026-A002');
   assert.equal(view.backHref, '/map?record=done&well=SW-2026-A002&from=check');
   assert.equal(view.backHref, `${mapHref(view.well)}&from=check`);
@@ -94,6 +95,28 @@ test('check: without a well, the first well of the newest finished map', async (
     '/wells/1/timeline': [],
   });
   assert.equal((await loadCheckView(null)).well.id, 'SW-2026-A001');
+});
+
+test('check: the wells before and after it in its map, by code', async () => {
+  backend({
+    '/wells/code/SW-2026-A002': wellView(2, 'SW-2026-A002'),
+    '/tasks/done': backendTask('done', 'completed'),
+    '/wells?taskId=done': [wellView(3, 'SW-2026-A003'), wellView(1, 'SW-2026-A001'), wellView(2, 'SW-2026-A002')],
+    '/wells/2/timeline': [],
+  });
+  const view = await loadCheckView('SW-2026-A002');
+  assert.equal(view.prevCode, 'SW-2026-A001');
+  assert.equal(view.nextCode, 'SW-2026-A003');
+});
+
+test('check: the first and last wells have nothing before or after them', () => {
+  const codes = ['SW-2026-A002', 'SW-2026-A001'];
+  assert.deepEqual(neighbourCodes(codes, 'SW-2026-A001'), { prevCode: null, nextCode: 'SW-2026-A002' });
+  assert.deepEqual(neighbourCodes(codes, 'SW-2026-A002'), { prevCode: 'SW-2026-A001', nextCode: null });
+});
+
+test('check: codes go in number order, A009 before A010', () => {
+  assert.deepEqual(neighbourCodes(['SW-2026-A010', 'SW-2026-A009', 'SW-2026-A011'], 'SW-2026-A010'), { prevCode: 'SW-2026-A009', nextCode: 'SW-2026-A011' });
 });
 
 test('check: an unknown well says so', async () => {

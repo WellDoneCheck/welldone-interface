@@ -49,6 +49,16 @@ export interface CheckView {
   captures: Capture[];
   // back to this well in its map, with its card already open (so the well moves straight back into it)
   backHref: string;
+  // the wells just before and after it in its map, by code; null at either end
+  prevCode: string | null;
+  nextCode: string | null;
+}
+
+// The codes just before and after a well's among its map's wells, in code order (A009 before A010)
+export function neighbourCodes(codes: string[], code: string): Pick<CheckView, 'prevCode' | 'nextCode'> {
+  const sorted = [...codes].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const index = sorted.indexOf(code);
+  return { prevCode: sorted[index - 1] ?? null, nextCode: sorted[index + 1] ?? null };
 }
 
 // The first well of the newest finished map, when the address names none
@@ -67,6 +77,12 @@ async function wellByCode(code: string): Promise<{ well: MapWell; task: Task }> 
 // /check?record=<well code> checks that well; without it the first well of the newest finished map
 export async function loadCheckView(code: string | null): Promise<CheckView> {
   const { well, task } = code ? await wellByCode(code) : await firstWell();
-  const timeline = await api<TimelineEntry[]>(`/wells/${well.wellId}/timeline`);
-  return { well, task, captures: timeline.map(toCapture), backHref: `${mapHref(well)}&from=check` };
+  const [timeline, wells] = await Promise.all([api<TimelineEntry[]>(`/wells/${well.wellId}/timeline`), fetchWells(task)]);
+  return {
+    well,
+    task,
+    captures: timeline.map(toCapture),
+    backHref: `${mapHref(well)}&from=check`,
+    ...neighbourCodes(wells.map((candidate) => candidate.id), well.id),
+  };
 }

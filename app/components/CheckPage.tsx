@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import TimelineCompare from './TimelineCompare';
 import BackToMapLink, { BACK_LINK_HEIGHT } from './BackToMapLink';
 import ExportEntry from './ExportEntry';
@@ -10,6 +11,7 @@ import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_X, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER } from './pageFrame';
 import { useSiteChrome } from './SiteChrome';
 import { useWellVerdicts } from './useWellVerdicts';
+import { useCheckLink } from './useCheckView';
 import { useBackendImage } from './useBackendImage';
 import { canVerify, saveVerdict, verdictOf } from '../utils/wellVerdicts';
 import { rememberVisit } from '../utils/lastVisit';
@@ -159,10 +161,32 @@ function WellInfo({ record }: { record: MapWell }) {
   );
 }
 
+/* ─── Well switcher ─────────────────────────────────────────────── */
+
+// To the well before or after this one in its map (by code), centred in the gutter on its side, level with the middle of the content
+function WellStepLink({ code, side }: { code: string; side: 'prev' | 'next' }) {
+  const { href, onNavigate, readAhead } = useCheckLink(code, []);
+  const isPrev = side === 'prev';
+  return (
+    <Link
+      href={href}
+      onNavigate={onNavigate}
+      onMouseEnter={readAhead}
+      onFocus={readAhead}
+      aria-label={`${isPrev ? '上一口井' : '下一口井'} ${code}`}
+      title={code}
+      className="pointer-events-auto absolute z-10 flex size-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center bg-[#2C322F]/75 text-[32px] font-bold text-white transition-colors hover:bg-[#2C322F]/90"
+      style={{ ...pagePart(`check-${side}`), top: `calc((100% + ${CONTENT_TOP - PAGE_GAP}px) / 2)`, left: isPrev ? PAGE_GUTTER / 2 : `calc(100% - ${PAGE_GUTTER / 2}px)` }}
+    >
+      {isPrev ? '‹' : '›'}
+    </Link>
+  );
+}
+
 /* ─── Page ──────────────────────────────────────────────────────── */
 
 export default function CheckPage({ view }: { view: CheckView }) {
-  const { well: record, task, captures, backHref } = view;
+  const { well: record, task, captures, backHref, prevCode, nextCode } = view;
   const scale = useFitScale(OVERLAY_STAGE);
   // the navbar's 水井檢查 comes back to the well checked last
   useEffect(() => rememberVisit('check', record.id), [record.id]);
@@ -173,6 +197,9 @@ export default function CheckPage({ view }: { view: CheckView }) {
 
       {/* beside it, the map file the well was found in */}
       <BackToMapLink href={backHref} transitionTypes={TO_MAP} mapFile={task} top={BACK_LINK_TOP} />
+
+      {prevCode && <WellStepLink code={prevCode} side="prev" />}
+      {nextCode && <WellStepLink code={nextCode} side="next" />}
 
       {/* lined up with the navbar left and right, centred in the height between the navbar and the window's bottom */}
       <div className="absolute flex items-center" style={{ ...pagePart('check-content'), top: CONTENT_TOP, bottom: PAGE_GAP, left: PAGE_GUTTER, right: PAGE_GUTTER }}>
