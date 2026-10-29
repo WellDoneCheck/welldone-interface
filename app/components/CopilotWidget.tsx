@@ -11,8 +11,9 @@ import { actionsForPage, fetchSuggestions, splitDetail } from '../utils/copilot'
 
 // Laid out for the 1920×1080 Figma frame and scaled to the viewport
 const STAGE: FitStage = { width: 1920, height: 1080, marginX: 0, marginY: 0, minViewportWidth: 0 };
-// Full-height drawer docked to the right edge; the tab is its handle
+// Full-height drawer docked to the right edge; the tab is its handle, at the bottom of its left edge
 const TAB_WIDTH = 56;
+const TAB_BOTTOM = 40;
 const DRAWER_WIDTH = 600;
 
 const MOTION = 'ease-[var(--ease-expo)] motion-reduce:transition-none';
@@ -286,8 +287,8 @@ function EdgeTab({ isOpen, onToggle }: { isOpen: boolean; onToggle: () => void }
       aria-expanded={isOpen}
       aria-controls="copilot-window"
       onClick={onToggle}
-      style={{ width: TAB_WIDTH }}
-      className={`group pointer-events-auto flex h-[176px] -mr-px shrink-0 flex-col items-center justify-center gap-3 rounded-l-[20px] bg-[#62A4A7] text-white shadow-[-4px_4px_16px_rgba(16,24,40,0.18)] outline-none transition-[transform,filter,box-shadow] duration-300 ${MOTION} hover:shadow-[-8px_6px_24px_rgba(16,24,40,0.28)] hover:brightness-110 focus-visible:shadow-[var(--shadow-focus)] ${
+      style={{ width: TAB_WIDTH, marginBottom: TAB_BOTTOM }}
+      className={`group pointer-events-auto flex h-[176px] -mr-px shrink-0 flex-col items-center justify-center gap-3 bg-[#62A4A7] text-white shadow-[-4px_4px_16px_rgba(16,24,40,0.18)] outline-none transition-[transform,filter,box-shadow] duration-300 ${MOTION} hover:shadow-[-8px_6px_24px_rgba(16,24,40,0.28)] hover:brightness-110 focus-visible:shadow-[var(--shadow-focus)] ${
         isOpen ? 'translate-x-0' : 'translate-x-3 hover:translate-x-0 focus-visible:translate-x-0'
       }`}
     >
@@ -356,7 +357,7 @@ export default function CopilotWidget() {
     >
       <div
         ref={drawerRef}
-        className={`flex items-center font-sans transition-transform duration-700 ${MOTION}`}
+        className={`flex items-end font-sans transition-transform duration-700 ${MOTION}`}
         style={{ zoom: scale, transform: isOpen ? 'none' : `translateX(${DRAWER_WIDTH}px)` }}
       >
         <EdgeTab isOpen={isOpen} onToggle={() => setIsOpen(!isOpen)} />
