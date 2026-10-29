@@ -440,6 +440,15 @@ body {
   from { opacity: 0; transform: translateY(-10px); }
 }
 
+/* 地圖：水井 pin 出現時從上方落下、壓扁回彈（MapPage 的 PoppingPin，時長與 PIN_POP_MS 一致） */
+@keyframes pin-pop {
+  0% { transform: translateY(-60%) scale(0.3); opacity: 0; }
+  50% { transform: translateY(0) scale(1.12, 0.88); opacity: 1; }
+  70% { transform: translateY(-8%) scale(0.95, 1.06); }
+  85% { transform: translateY(0) scale(1.03, 0.97); }
+  100% { transform: none; }
+}
+
 /* 載入動畫（WellLoader）：水井漣漪、中心呼吸、跳動的點 */
 @keyframes well-ripple {
   from { transform: scale(0.12); opacity: 1; }

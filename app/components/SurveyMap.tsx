@@ -29,6 +29,8 @@ export interface SurveyMapSettings {
 interface SurveyMapState {
   map: MapLibreMap | null;
   setSettings: (settings: SurveyMapSettings) => void;
+  // a layer over the map but under its shade, for page elements standing in for what the map draws (shaded as it is)
+  underShade: HTMLDivElement | null;
 }
 
 const SurveyMapContext = createContext<SurveyMapState | null>(null);
@@ -36,6 +38,7 @@ const SurveyMapContext = createContext<SurveyMapState | null>(null);
 export default function SurveyMap({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<SurveyMapSettings | null>(null);
   const [map, setMap] = useState<MapLibreMap | null>(null);
+  const [underShade, setUnderShade] = useState<HTMLDivElement | null>(null);
   // the imported map shown, for its row on the upload page to grow into the map (and the map to shrink back into it);
   // the last one named, while a page or sheet without one is shown
   const record = useSearchParams().get('record');
@@ -43,7 +46,7 @@ export default function SurveyMap({ children }: { children: ReactNode }) {
   if (record && record !== mapFileId) setMapFileId(record);
   // a new value only when the map is: a page hands its settings over on every render (useSurveyMap), and a new value
   // on each of those would render the page again, and so on
-  const state = useMemo(() => ({ map, setSettings }), [map]);
+  const state = useMemo(() => ({ map, setSettings, underShade }), [map, underShade]);
 
   return (
     <SurveyMapContext value={state}>
@@ -55,6 +58,7 @@ export default function SurveyMap({ children }: { children: ReactNode }) {
           <SharedTransition name={uploadRecordName(mapFileId ?? 'none')} share={UPLOAD_RECORD_SHARE}>
             <div className="absolute inset-0">
               {settings && <TileMap {...settings} interactive onReady={setMap} />}
+              <div ref={setUnderShade} className="pointer-events-none absolute inset-0" />
               <MapShade />
             </div>
           </SharedTransition>
@@ -67,6 +71,11 @@ export default function SurveyMap({ children }: { children: ReactNode }) {
 
 // For a page in the (survey) group: hands the map its settings (again whenever they change) and gives back the map, once
 // it has started. The page's own parts go over it: the map takes pointer events only where nothing of the page is.
+// The layer over the map and under its shade (null until it is there)
+export function useUnderMapShade(): HTMLDivElement | null {
+  return useContext(SurveyMapContext)?.underShade ?? null;
+}
+
 export function useSurveyMap(settings: SurveyMapSettings): MapLibreMap | null {
   const context = useContext(SurveyMapContext);
   if (!context) throw new Error('useSurveyMap is for pages in the (survey) route group');
