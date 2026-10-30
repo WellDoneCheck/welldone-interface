@@ -15,7 +15,7 @@ import { useMapView } from './useMapView';
 import { useWellVerdicts } from './useWellVerdicts';
 import type { WellStatus } from '../data/monitor';
 import type { MapView } from '../utils/routeRecords';
-import { liveTask, withRealTasks } from '../utils/monitorLive';
+import { liveTask, withRealData } from '../utils/monitorLive';
 import { monitorFigures, wellMarker } from '../utils/monitorStats';
 import { canRename } from '../utils/tasks';
 import { verdictOf } from '../utils/wellVerdicts';
@@ -35,13 +35,14 @@ export default function MonitorPage() {
   const logIn = () => requireLogin(() => {});
   const live = useLiveMonitor();
   const { paused, togglePaused, cycle } = live;
-  // once logged in the well figures, the batches (the imported maps) and the services' health come from the backend;
-  // the other events stay simulated
+  // once logged in the well figures, the batches (the imported maps), the services' health and the events it logs come
+  // from the backend; nothing simulated is left
   const stats = monitorFigures(useMonitorStats(paused), live.snapshot.totals);
   const realTasks = useTaskRecords(isLoggedIn);
-  const realServices = useServiceHealth(paused);
-  const withTasks = isLoggedIn ? withRealTasks(live.snapshot, realTasks.records.map(liveTask)) : live.snapshot;
-  const snapshot = realServices ? { ...withTasks, services: realServices } : withTasks;
+  const serviceReading = useServiceHealth(paused);
+  const snapshot = isLoggedIn
+    ? withRealData(live.snapshot, realTasks.records.map(liveTask), serviceReading?.services ?? null, serviceReading?.events ?? [])
+    : live.snapshot;
   const renameTask = session && canRename(session.role) ? realTasks.rename : undefined;
   const [filter, setFilter] = useState<WellStatus | null>(null);
   // once logged in, the map of the task picked in the tasks panel on the map (the newest finished one until then), with

@@ -10,7 +10,7 @@ export const CPU_HISTORY_LENGTH = 24;
 // Service load at or above these (%) needs a look / is overloaded
 export const LOAD_WARNING = 80;
 export const LOAD_CRITICAL = 90;
-const MAX_EVENTS = 20;
+export const MAX_EVENTS = 20;
 const MAX_TASKS = 6;
 const MINUTE = 60 * 1000;
 
@@ -106,9 +106,10 @@ export function liveTask(record: TaskRecord): LiveTask {
   };
 }
 
-// What the page shows once logged in: the real batches, and only the simulated events not about a simulated batch
-export function withRealTasks(snapshot: MonitorSnapshot, tasks: LiveTask[]): MonitorSnapshot {
-  return { ...snapshot, tasks, events: snapshot.events.filter((event) => !event.task) };
+// What the page shows once logged in: the real batches, the real services (the simulated ones until they are first
+// read) and only the events those logged, none of the simulated ones
+export function withRealData(snapshot: MonitorSnapshot, tasks: LiveTask[], services: LiveService[] | null, events: LiveEvent[]): MonitorSnapshot {
+  return { ...snapshot, tasks, services: services ?? snapshot.services, events };
 }
 
 /* ─── Names ─────────────────────────────────────────────────────── */
@@ -176,7 +177,7 @@ export function formatAgo(ms: number): string {
 
 /* ─── One update ────────────────────────────────────────────────── */
 
-type NewEvent = Omit<LiveEvent, 'id' | 'at'>;
+export type NewEvent = Omit<LiveEvent, 'id' | 'at'>;
 
 // Drifts around the service's usual load, a little each update
 function nextService(service: LiveService, random: Random): LiveService {
@@ -189,12 +190,24 @@ function nextService(service: LiveService, random: Random): LiveService {
   return { ...service, cpu: [...service.cpu.slice(1), cpu], memory };
 }
 
-// Logs a service getting busier or calming down
-function loadEvent(before: LiveService, after: LiveService): NewEvent | null {
+// 'CPU 42.5%・記憶體 61%', of the loads known; undefined when neither is
+function loadDetail(service: LiveService): string | undefined {
+  const cpu = currentCpu(service);
+  const memory = memoryPercent(service);
+  const parts = [cpu !== null && `CPU ${cpu}%`, memory !== null && `記憶體 ${Math.round(memory)}%`].filter(Boolean);
+  return parts.length > 0 ? parts.join('・') : undefined;
+}
+
+// Logs a service going down or coming back, getting busier or calming down; one not seen before (before undefined) only
+// when it is down
+export function serviceEvent(before: LiveService | undefined, after: LiveService): NewEvent | null {
+  if (!after.up) return before?.up === false ? null : { level: 'critical', title: `服務離線：${after.name}`, detail: '健康檢查沒有回應' };
+  if (!before) return null;
+  const detail = loadDetail(after);
+  if (!before.up) return { level: 'good', title: `服務恢復：${after.name}`, detail };
   const from = serviceLevel(before);
   const to = serviceLevel(after);
   if (from === to) return null;
-  const detail = `CPU ${currentCpu(after)}%・記憶體 ${Math.round(memoryPercent(after) ?? 0)}%`;
   if (to === 'critical') return { level: 'critical', title: `服務過載：${after.name}`, detail };
   if (to === 'warning' && from === 'good') return { level: 'warning', title: `負載偏高：${after.name}`, detail };
   if (to === 'good') return { level: 'good', title: `負載恢復正常：${after.name}`, detail };
@@ -264,7 +277,7 @@ function nextTasks(tasks: LiveTask[], now: number, nextTaskNumber: number, rando
 
 export function nextSnapshot(snapshot: MonitorSnapshot, now: number, random: Random): MonitorSnapshot {
   const services = snapshot.services.map((service) => nextService(service, random));
-  const loadEvents = snapshot.services.map((before, index) => loadEvent(before, services[index])).filter((event) => event !== null);
+  const loadEvents = snapshot.services.map((before, index) => serviceEvent(before, services[index])).filter((event) => event !== null);
   const taskStep = nextTasks(snapshot.tasks, now, snapshot.nextTaskNumber, random);
 
   const newEvents = [...loadEvents, ...taskStep.events].map((event, index) => ({

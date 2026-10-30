@@ -534,6 +534,7 @@ export function EventsPanel({ events, tasks, now }: { events: LiveEvent[]; tasks
   const needsLook = events.filter((event) => event.level === 'warning' || event.level === 'critical').length;
   return (
     <Panel title="警示與事件" meta={needsLook > 0 ? `${needsLook} 則需注意` : '沒有需要注意的事件'} className="flex-1">
+      {events.length === 0 && <p className={`border-t ${RULE} px-5 py-3 text-sm ${MUTED}`}>目前沒有警示</p>}
       <ol aria-live="polite" className="min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(44,50,47,0.2)_transparent] [scrollbar-width:thin]">
         {events.map((event) => (
           <li key={event.id} className={`border-t ${RULE} [animation:monitor-event-in_600ms_var(--ease-expo)_both] motion-reduce:[animation:none]`}>

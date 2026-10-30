@@ -11,7 +11,8 @@ import {
   loadLevel,
   minutesLeft,
   nextSnapshot,
-  withRealTasks,
+  withRealData,
+  serviceEvent,
   serviceLevel,
   systemHealth,
   taskName,
@@ -79,13 +80,42 @@ test('an imported map shows as a batch: its tiles as images, a default name left
   assert.equal(liveTask(record('failed')).error, '辨識失敗');
 });
 
-test('once logged in, the real batches replace the simulated ones and their events', () => {
+test('once logged in, the real batches, services and their events replace all the simulated ones', () => {
   const snapshot = createSnapshot(T0);
-  const real = withRealTasks(snapshot, [liveTask(record('done'))]);
+  const services = [{ name: '切圖服務', code: 'welldone-splitter', up: true, cpuBase: 0, cpu: [], memory: null }];
+  const events = [{ id: 'service-event-1', level: 'critical', title: '服務離線：模型辨識服務', at: T0 }];
+  const real = withRealData(snapshot, [liveTask(record('done'))], services, events);
   assert.deepEqual(real.tasks.map((task) => task.id), ['task-a']);
-  assert.ok(real.events.length > 0);
-  assert.ok(real.events.every((event) => !event.task));
-  assert.deepEqual(real.services, snapshot.services);
+  assert.equal(real.services, services);
+  assert.equal(real.events, events);
+});
+
+test('until the services are first read, the simulated ones stand in, with no events', () => {
+  const snapshot = createSnapshot(T0);
+  const real = withRealData(snapshot, [], null, []);
+  assert.equal(real.services, snapshot.services);
+  assert.deepEqual(real.events, []);
+});
+
+const service = (overrides) => ({ name: '切圖服務', code: 'welldone-splitter', up: true, cpuBase: 0, cpu: [20], memory: { usedGb: 1, totalGb: 4 }, ...overrides });
+
+test('a service going down is logged as offline, and coming back as recovered', () => {
+  const down = serviceEvent(service(), service({ up: false, cpu: [], memory: null }));
+  assert.deepEqual(down, { level: 'critical', title: '服務離線：切圖服務', detail: '健康檢查沒有回應' });
+  assert.equal(serviceEvent(service({ up: false }), service({ up: false })), null);
+  assert.deepEqual(serviceEvent(service({ up: false }), service()), { level: 'good', title: '服務恢復：切圖服務', detail: 'CPU 20%・記憶體 25%' });
+});
+
+test('a service seen for the first time is logged only when it is down', () => {
+  assert.equal(serviceEvent(undefined, service()), null);
+  assert.equal(serviceEvent(undefined, service({ cpu: [95] })), null);
+  assert.equal(serviceEvent(undefined, service({ up: false })).title, '服務離線：切圖服務');
+});
+
+test("a service's load events leave out the loads not known", () => {
+  const busy = serviceEvent(service(), service({ cpu: [85], memory: null }));
+  assert.deepEqual(busy, { level: 'warning', title: '負載偏高：切圖服務', detail: 'CPU 85%' });
+  assert.equal(serviceEvent(service({ up: false, cpu: [], memory: null }), service({ cpu: [], memory: null })).detail, undefined);
 });
 
 test('an event keeps the name its batch had once the batch is no longer listed', () => {

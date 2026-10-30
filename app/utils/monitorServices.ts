@@ -1,7 +1,7 @@
 // The monitor page's services once logged in: the backend's checks (GET /monitor/services, well-back docs/API.md), each
-// one actually reaching the service and reading its container's load from Docker
+// one actually reaching the service and reading its container's load from Docker; and the events they log
 import { api } from './api';
-import { CPU_HISTORY_LENGTH, type LiveService } from './monitorLive';
+import { CPU_HISTORY_LENGTH, MAX_EVENTS, serviceEvent, type LiveEvent, type LiveService } from './monitorLive';
 
 export type ServiceCode = 'backend' | 'postgres' | 'redis' | 'splitter' | 'titiler' | 'ai';
 
@@ -49,4 +49,30 @@ export function liveServices(checks: ServiceHealth[], before: LiveService[]): Li
   return checks
     .filter((health) => SERVICE_NAMES[health.code])
     .map((health) => liveService(health, before.find((service) => service.code === `welldone-${health.code}`)));
+}
+
+// The services as last read, and what changed in them so far (newest first)
+export interface ServiceReading {
+  services: LiveService[];
+  events: LiveEvent[];
+  // numbers the next event
+  nextEventNumber: number;
+}
+
+// A new read of the checks after the last (null: the first): a service going down or coming back, or its load going
+// up or down, is logged as an event; at the first read only the services down are
+export function nextReading(last: ServiceReading | null, checks: ServiceHealth[], now: number): ServiceReading {
+  const before = last?.services ?? [];
+  const services = liveServices(checks, before);
+  const found = services
+    .map((service) => serviceEvent(before.find((candidate) => candidate.code === service.code), service))
+    .filter((event) => event !== null);
+  const nextEventNumber = last?.nextEventNumber ?? 1;
+  const events = found.map((event, index) => ({ ...event, id: `service-event-${nextEventNumber + index}`, at: now }));
+  return {
+    services,
+    // newest first: the last one logged in this read goes on top
+    events: [...events.reverse(), ...(last?.events ?? [])].slice(0, MAX_EVENTS),
+    nextEventNumber: nextEventNumber + events.length,
+  };
 }

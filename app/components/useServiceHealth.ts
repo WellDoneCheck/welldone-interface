@@ -2,15 +2,15 @@
 
 import { useEffect, useState } from 'react';
 import { useSiteChrome } from './SiteChrome';
-import { REFRESH_MS, type LiveService } from '../utils/monitorLive';
-import { fetchServiceHealth, liveServices } from '../utils/monitorServices';
+import { REFRESH_MS } from '../utils/monitorLive';
+import { fetchServiceHealth, nextReading, type ServiceReading } from '../utils/monitorServices';
 
-// The backend's service checks, read again every REFRESH_MS until paused, each keeping its recent CPU readings; null
-// while nobody is logged in or before the first answer (a failed read keeps the last one)
-export function useServiceHealth(paused: boolean): LiveService[] | null {
+// The backend's service checks, read again every REFRESH_MS until paused, each keeping its recent CPU readings, with the
+// events their changes logged; null while nobody is logged in or before the first answer (a failed read keeps the last one)
+export function useServiceHealth(paused: boolean): ServiceReading | null {
   const { session } = useSiteChrome();
   const userId = session?.userId ?? null;
-  const [read, setRead] = useState<{ userId: string; services: LiveService[] } | null>(null);
+  const [read, setRead] = useState<{ userId: string; reading: ServiceReading } | null>(null);
 
   useEffect(() => {
     if (!userId) return;
@@ -19,7 +19,7 @@ export function useServiceHealth(paused: boolean): LiveService[] | null {
       fetchServiceHealth().then(
         (checks) =>
           current &&
-          setRead((before) => ({ userId, services: liveServices(checks, before?.userId === userId ? before.services : []) })),
+          setRead((last) => ({ userId, reading: nextReading(last?.userId === userId ? last.reading : null, checks, Date.now()) })),
         () => undefined,
       );
     refresh();
@@ -30,5 +30,5 @@ export function useServiceHealth(paused: boolean): LiveService[] | null {
     };
   }, [userId, paused]);
 
-  return read && read.userId === userId ? read.services : null;
+  return read && read.userId === userId ? read.reading : null;
 }

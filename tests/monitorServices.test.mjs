@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CPU_HISTORY_LENGTH } from '../app/utils/monitorLive.ts';
-import { liveService, liveServices } from '../app/utils/monitorServices.ts';
+import { liveService, liveServices, nextReading } from '../app/utils/monitorServices.ts';
 
 const GB = 1024 ** 3;
 const check = (code, usage = { cpuPercent: 12.5, memoryUsedBytes: 0.5 * GB, memoryLimitBytes: 2 * GB }) => ({
@@ -57,4 +57,35 @@ test("the queue's Redis is not shown, leaving the five rows the panel has room f
     rows.map((row) => row.code),
     ['welldone-backend', 'welldone-postgres', 'welldone-splitter', 'welldone-titiler', 'welldone-ai'],
   );
+});
+
+const T0 = Date.UTC(2026, 9, 30, 8, 0);
+const down = (code) => ({ code, up: false, latencyMs: null, usage: null });
+
+test('the first read logs only the services that are down', () => {
+  const reading = nextReading(null, [check('backend'), down('ai')], T0);
+  assert.deepEqual(
+    reading.events.map((event) => [event.id, event.title, event.at]),
+    [['service-event-1', '服務離線：模型辨識服務', T0]],
+  );
+  assert.equal(reading.nextEventNumber, 2);
+});
+
+test('nothing changing logs nothing; a service coming back is logged on top', () => {
+  const first = nextReading(null, [check('backend'), down('ai')], T0);
+  const same = nextReading(first, [check('backend'), down('ai')], T0 + 5000);
+  assert.deepEqual(same.events.map((event) => event.id), ['service-event-1']);
+
+  const back = nextReading(same, [check('backend'), check('ai', null)], T0 + 10000);
+  assert.deepEqual(
+    back.events.map((event) => [event.id, event.title]),
+    [
+      ['service-event-2', '服務恢復：模型辨識服務'],
+      ['service-event-1', '服務離線：模型辨識服務'],
+    ],
+  );
+});
+
+test('all up from the start: no events', () => {
+  assert.deepEqual(nextReading(null, [check('backend'), check('postgres')], T0).events, []);
 });
