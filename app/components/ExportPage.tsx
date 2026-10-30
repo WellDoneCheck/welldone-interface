@@ -1,13 +1,12 @@
 'use client';
 
-import { startTransition, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { addTransitionType, startTransition, useEffect, useMemo, useRef, useState } from 'react';
 import { useWellVerdicts } from './useWellVerdicts';
 import { canVerify, lookOf, saveVerdict, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useFitScale, type FitStage } from './useFitScale';
-import { NAVBAR_HEIGHT } from './pageFrame';
-import SharedTransition, { ExportPageTransition, FROM_EXPORT, FROM_EXPORT_SHARE, SHARED } from './SharedTransition';
+import SharedTransition, { FROM_EXPORT, FROM_EXPORT_SHARE, OPEN_SHEET, SHARED } from './SharedTransition';
 import LoadNotice from './LoadNotice';
 import { useSiteChrome } from './SiteChrome';
 import { useMapView } from './useMapView';
@@ -23,13 +22,8 @@ const EXPORT_STAGE: FitStage = { width: 1920, height: 0, marginX: 0, marginY: 0,
 const CARD_WIDTH = 320;
 const CARD_GAP = 28;
 const CSV_FILE_NAME = 'skywell-wells.csv';
-// The aerial photo at the top of the page, fading into the paper colour at its bottom
-const HERO_HEIGHT = 1077;
-const HERO_FADE = 'bg-[linear-gradient(to_top,#F7F6F1_7.692%,rgba(18,20,18,0.2))]';
-// Space above the summary card: under the navbar on the page, under the handle in the sheet
-const TOP_SPACE = { page: 238, sheet: 24 };
-// Share of the hero height from where the page is plain paper, so the navbar needs dark text over it
-const HERO_PAPER_FROM = 0.85;
+// Space above the summary card, under the sheet's handle
+const TOP_SPACE = 24;
 
 // A section per verification, in the colours the map's pins wear (VERDICT_COLOR: teal a well, grey not one, red not
 // yet verified); the counts on top and each card's tag the same
@@ -113,17 +107,12 @@ interface HeroSummaryProps {
   counts: Record<SectionKind, number>;
   selectedCount: number;
   onExport: () => void;
-  // on the sheet's plain paper the card is white with a soft shadow; over the page's aerial photo it is frosted glass
-  onPaper: boolean;
 }
 
-function HeroSummary({ counts, selectedCount, onExport, onPaper }: HeroSummaryProps) {
+// On the sheet's plain paper: white with a soft shadow
+function HeroSummary({ counts, selectedCount, onExport }: HeroSummaryProps) {
   return (
-    <div
-      className={`relative mx-[60px] flex h-[340px] ${
-        onPaper ? 'bg-white shadow-[8px_8px_40px_0_rgba(0,0,0,0.12)]' : 'bg-[rgba(247,246,241,0.4)] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] backdrop-blur-[2px]'
-      }`}
-    >
+    <div className="relative mx-[60px] flex h-[340px] bg-white shadow-[8px_8px_40px_0_rgba(0,0,0,0.12)]">
       <div className="flex w-[449px] flex-col justify-between pb-[48px] pl-[64px] pt-[48px] font-bold text-[#2C322F]">
         <p className="w-[280px] text-[20px] leading-[1.6]">管理並匯出 AI 水井辨識結果，支援多種地理資訊格式以利後續分析與建檔。</p>
         <h1 className="text-[36px] leading-[normal]">資料匯出</h1>
@@ -156,17 +145,24 @@ interface WellCardProps {
   // null: the user may not verify (a viewer)
   onVerdict: ((verdict: Verdict) => void) | null;
   onOpen: () => void;
+  // left unrendered while out of view (a card past the first few, off along the row)
+  deferred: boolean;
 }
 
-function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen }: WellCardProps) {
+function WellCard({ well, selected, shared, onToggle, onVerdict, onOpen, deferred }: WellCardProps) {
   const badge = BADGES[lookOf(well.verdict)];
   // read ahead as the pointer or focus comes to the photo, so the check page is ready when it is opened
   const check = useCheckLink(well.id, FROM_EXPORT);
   const photo = useBackendImage(wellImageUrl(well, CARD_WIDTH));
 
   return (
-    // cards scrolled out of the row are not rendered until they come into view (50 cards with large shadows)
-    <article className="w-[320px] shrink-0 snap-start bg-white pb-[16px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] [contain-intrinsic-size:auto_320px_auto_440px] [content-visibility:auto]">
+    // cards scrolled out of the row are not rendered until they come into view (50 cards with large shadows); not the
+    // first few: in the sheet they start below the window, and would be rendered one by one as it slides up over them
+    <article
+      className={`w-[320px] shrink-0 snap-start bg-white pb-[16px] shadow-[8px_8px_50px_0_rgba(0,0,0,0.4)] ${
+        deferred ? '[contain-intrinsic-size:auto_320px_auto_440px] [content-visibility:auto]' : ''
+      }`}
+    >
       <div className="relative h-[320px] w-[320px]">
         {/* the photo opens this well on the check page to compare its captures; clicking it first marks this card as the
             one whose parts move there */}
@@ -270,7 +266,12 @@ function useRenderedCount(total: number): number {
 
   useEffect(() => {
     if (count >= total) return;
-    const reveal = () => startTransition(() => setCount(total));
+    // a transition of the sheet's (OPEN_SHEET): an untyped one would cross-fade the whole page, the sheet with it
+    const reveal = () =>
+      startTransition(() => {
+        OPEN_SHEET.forEach(addTransitionType);
+        setCount(total);
+      });
     if ('requestIdleCallback' in window) {
       const id = requestIdleCallback(reveal, { timeout: REVEAL_TIMEOUT_MS });
       return () => cancelIdleCallback(id);
@@ -343,7 +344,7 @@ function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdic
             className="flex flex-1 snap-x snap-mandatory overflow-x-auto px-[5px] pb-[60px] pt-[20px] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             style={{ gap: CARD_GAP }}
           >
-            {wells.slice(0, renderedCount).map((well) => (
+            {wells.slice(0, renderedCount).map((well, index) => (
               <WellCard
                 key={well.id}
                 well={well}
@@ -352,6 +353,7 @@ function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdic
                 onToggle={() => onToggle(well.id)}
                 onVerdict={onVerdict && ((verdict) => onVerdict(well, verdict))}
                 onOpen={() => onOpen(well.id)}
+                deferred={index >= INITIAL_CARDS}
               />
             ))}
           </div>
@@ -364,42 +366,9 @@ function WellSection({ kind, wells, selectedIds, onToggle, onToggleAll, onVerdic
 
 /* ─── Page ──────────────────────────────────────────────────────── */
 
-// True once the marker has scrolled up under the navbar; the navbar then switches to dark text (see Navbar's data-nav-light).
-// Scroll events are caught on the document so this works both when the window scrolls and when the sheet does.
-function useNavLightPast(marker: RefObject<HTMLDivElement | null>): boolean {
-  const [light, setLight] = useState(false);
-
-  useEffect(() => {
-    const update = () => {
-      const element = marker.current;
-      if (element) setLight(element.getBoundingClientRect().top < NAVBAR_HEIGHT);
-    };
-    update();
-    document.addEventListener('scroll', update, { capture: true, passive: true });
-    window.addEventListener('resize', update);
-    return () => {
-      document.removeEventListener('scroll', update, { capture: true });
-      window.removeEventListener('resize', update);
-    };
-  }, [marker]);
-
-  // the navbar re-reads data-nav-light on window scroll events: tell it right after the attribute is written,
-  // and again once this page is gone
-  useLayoutEffect(() => {
-    window.dispatchEvent(new Event('scroll'));
-  }, [light]);
-  useEffect(() => () => void requestAnimationFrame(() => window.dispatchEvent(new Event('scroll'))), []);
-
-  return light;
-}
-
-// As a page: the aerial photo at the top, fading into paper. In the pull-up sheet (inSheet), only the summary and the
-// wells on the sheet's paper, with the page it was opened from behind the sheet.
-export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
+// The summary and the wells on the export sheet's paper (ExportSheet)
+export default function ExportPage() {
   const scale = useFitScale(EXPORT_STAGE);
-  const heroHeight = HERO_HEIGHT * scale;
-  const paperMarker = useRef<HTMLDivElement>(null);
-  const navLight = useNavLightPast(paperMarker);
   // the wells of the map the page was opened from (?record=; the newest finished map if none), with the verdicts
   // given so far, here or on the check page
   const loaded = useMapView(usePageSearchParams('/export').get('record'));
@@ -436,43 +405,25 @@ export default function ExportPage({ inSheet = false }: { inSheet?: boolean }) {
   const sectionProps = { selectedIds, onToggle: toggleWell, onToggleAll: toggleAll, onVerdict, openingId, onOpen: setOpeningId };
   if (loaded?.status !== 'ready') return <LoadNotice loaded={loaded} />;
 
-  const content = (
-    <div className="relative mx-auto w-[1920px] pb-[160px]" style={{ zoom: scale, paddingTop: inSheet ? TOP_SPACE.sheet : TOP_SPACE.page }}>
-      <HeroSummary
-        counts={{ well: wellsOf('well').length, 'not-well': wellsOf('not-well').length, pending: wellsOf('pending').length }}
-        selectedCount={selectedIds.size}
-        onExport={() => downloadCsv(CSV_FILE_NAME, buildWellsCsv(wells.filter((well) => selectedIds.has(well.id))))}
-        onPaper={inSheet}
-      />
-      {verdictError && (
-        <p role="alert" className="mx-[60px] mt-[24px] text-[20px] font-bold text-[#BC5646]">
-          {verdictError}
-        </p>
-      )}
-      {wells.length === 0 ? (
-        <EmptyRow text={NO_WELLS} className="mt-[96px]" />
-      ) : (
-        SECTION_ORDER.map((kind) => <WellSection key={kind} kind={kind} wells={wellsOf(kind)} {...sectionProps} />)
-      )}
-    </div>
-  );
-
-  if (inSheet) return <div style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>{content}</div>;
-
   return (
-    <ExportPageTransition>
-      <div
-        data-nav-light={String(navLight)}
-        className="relative min-h-screen overflow-hidden bg-[#F7F6F1]"
-        style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}
-      >
-        <div className="absolute inset-x-0 top-0" style={{ height: heroHeight }}>
-          <Image src="/aerial-bg.webp" unoptimized alt="" fill priority sizes="100vw" className="object-cover" />
-          <div className={`absolute inset-0 ${HERO_FADE}`} />
-        </div>
-        <div ref={paperMarker} className="pointer-events-none absolute inset-x-0 h-px" style={{ top: heroHeight * HERO_PAPER_FROM }} />
-        {content}
+    <div style={{ fontFamily: 'var(--font-noto-serif-tc), serif' }}>
+      <div className="relative mx-auto w-[1920px] pb-[160px]" style={{ zoom: scale, paddingTop: TOP_SPACE }}>
+        <HeroSummary
+          counts={{ well: wellsOf('well').length, 'not-well': wellsOf('not-well').length, pending: wellsOf('pending').length }}
+          selectedCount={selectedIds.size}
+          onExport={() => downloadCsv(CSV_FILE_NAME, buildWellsCsv(wells.filter((well) => selectedIds.has(well.id))))}
+        />
+        {verdictError && (
+          <p role="alert" className="mx-[60px] mt-[24px] text-[20px] font-bold text-[#BC5646]">
+            {verdictError}
+          </p>
+        )}
+        {wells.length === 0 ? (
+          <EmptyRow text={NO_WELLS} className="mt-[96px]" />
+        ) : (
+          SECTION_ORDER.map((kind) => <WellSection key={kind} kind={kind} wells={wellsOf(kind)} {...sectionProps} />)
+        )}
       </div>
-    </ExportPageTransition>
+    </div>
   );
 }

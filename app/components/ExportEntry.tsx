@@ -1,10 +1,12 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname, useSearchParams } from 'next/navigation';
 import SharedTransition, { OPEN_SHEET, SHARED } from './SharedTransition';
 import { useWellVerdicts } from './useWellVerdicts';
 import { useMapView } from './useMapView';
 import { countVerdicts } from '../utils/wellVerdicts';
+import { exportHref } from '../utils/exportCover';
 import type { MapWell } from '../utils/wells';
 
 function WellCount({ count, label, color }: { count: number; label: string; color: string }) {
@@ -23,11 +25,14 @@ export default function ExportEntry({ recordId, wells }: { recordId?: string; we
   const loaded = useMapView(recordId ?? null);
   // as verified so far, on the check and export pages
   const { verified, pending } = countVerdicts(wells ?? (loaded?.status === 'ready' ? loaded.value.wells : []), useWellVerdicts());
+  // the sheet opens over this page, and over it again when reloaded
+  const search = useSearchParams().toString();
+  const over = `${usePathname()}${search ? `?${search}` : ''}`;
   return (
     // on every page in the same corner: it stays put while the rest of the page changes
     <SharedTransition name={SHARED.exportEntry}>
       <Link
-        href={recordId ? `/export?record=${encodeURIComponent(recordId)}` : '/export'}
+        href={exportHref(recordId, over)}
         transitionTypes={OPEN_SHEET}
         aria-label={`資料匯出：${verified} 口已驗證、${pending} 口未驗證`}
         className="group block w-fit outline-none focus-visible:shadow-[0_0_0_4px_#62A4A7]"

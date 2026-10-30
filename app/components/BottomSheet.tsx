@@ -113,31 +113,39 @@ export default function BottomSheet({ label, onClosed, layerName, children }: Bo
         style={{ transitionDuration: `${SLIDE_MS}ms`, viewTransitionName: layerName && `${layerName}-shade` }}
       />
 
-      {/* its shadow fades in and out as it slides (parked below the window, it would cast it over the bottom edge) */}
       <div
-        className={`absolute inset-x-0 bottom-0 flex flex-col overflow-hidden rounded-t-[28px] bg-[#F7F6F1] will-change-transform motion-reduce:transition-none ${
-          raised ? 'shadow-[0_-16px_48px_rgba(0,0,0,0.35)]' : 'shadow-[0_-16px_48px_rgba(0,0,0,0)]'
-        } ${dragY === null ? 'transition-[transform,box-shadow] ease-[var(--ease-expo)]' : 'transition-shadow ease-[var(--ease-expo)]'}`}
+        className={`absolute inset-x-0 bottom-0 will-change-transform motion-reduce:transition-none ${dragY === null ? 'transition-transform ease-[var(--ease-expo)]' : ''}`}
         style={{ top: CONTENT_TOP, transform: `translateY(${panelOffset})`, transitionDuration: `${SLIDE_MS}ms` }}
         onTransitionEnd={(event) => {
           if (event.target === event.currentTarget && phase === 'leaving') finish();
         }}
       >
-        <button
-          type="button"
-          aria-label={`收合${label}`}
-          onPointerDown={startDrag}
-          onPointerMove={moveDrag}
-          onPointerUp={endDrag}
-          onPointerCancel={endDrag}
-          // Enter or Space on the focused handle (a pointer's click is already handled by the drag)
-          onClick={(event) => event.detail === 0 && close()}
-          className="group flex h-[36px] w-full shrink-0 cursor-grab touch-none items-center justify-center outline-none active:cursor-grabbing"
-        >
-          <span className="h-[5px] w-[56px] rounded-full bg-[#2C322F]/25 transition-[width,background-color] duration-300 group-hover:w-[72px] group-hover:bg-[#2C322F]/40 group-focus-visible:bg-[#62A4A7]" />
-        </button>
-        {/* content sized to the window width would overflow by the scrollbar: it only scrolls up and down */}
-        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">{children}</div>
+        {/* its shadow fades in and out as it slides (parked below the window, it would cast it over the bottom edge): a
+            layer of its own fading, not a shadow changing, so the slide is never repainted (a stutter on every frame) */}
+        <div
+          aria-hidden
+          className={`absolute inset-0 rounded-t-[28px] shadow-[0_-16px_48px_rgba(0,0,0,0.35)] transition-opacity ease-[var(--ease-expo)] motion-reduce:transition-none ${
+            raised ? 'opacity-100' : 'opacity-0'
+          }`}
+          style={{ transitionDuration: `${SLIDE_MS}ms` }}
+        />
+        <div className="relative flex h-full flex-col overflow-hidden rounded-t-[28px] bg-[#F7F6F1]">
+          <button
+            type="button"
+            aria-label={`收合${label}`}
+            onPointerDown={startDrag}
+            onPointerMove={moveDrag}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            // Enter or Space on the focused handle (a pointer's click is already handled by the drag)
+            onClick={(event) => event.detail === 0 && close()}
+            className="group flex h-[36px] w-full shrink-0 cursor-grab touch-none items-center justify-center outline-none active:cursor-grabbing"
+          >
+            <span className="h-[5px] w-[56px] rounded-full bg-[#2C322F]/25 transition-[width,background-color] duration-300 group-hover:w-[72px] group-hover:bg-[#2C322F]/40 group-focus-visible:bg-[#62A4A7]" />
+          </button>
+          {/* content sized to the window width would overflow by the scrollbar: it only scrolls up and down */}
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain">{children}</div>
+        </div>
       </div>
     </div>
   );

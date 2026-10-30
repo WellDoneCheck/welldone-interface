@@ -99,17 +99,6 @@ export function PageTransition({ children }: { children: ReactNode }) {
   return <ViewTransition default={NONE_FOR_SHEET}>{children}</ViewTransition>;
 }
 
-// The export page: recedes while a well card flies from it to the check page (export-page-out in globals.css); no
-// transition of its own otherwise, so opening and closing the sheet still start none. (As a sheet it is not removed but
-// hidden when the page changes, so this never runs there: the sheet recedes by the name on its own layer instead.)
-export function ExportPageTransition({ children }: { children: ReactNode }) {
-  return (
-    <ViewTransition enter="none" update="none" exit={{ 'from-export': 'export-page-out', default: 'none' }}>
-      {children}
-    </ViewTransition>
-  );
-}
-
 // The map and check page backgrounds: going to the check page the map zooms in on the well's pin while the close-up
 // takes over, and coming back the map zooms out from the pin (animations in globals.css); otherwise they cross-fade
 export function PageBackgroundTransition({ children }: { children: ReactNode }) {
@@ -141,6 +130,7 @@ function subscribeToSheet(listener: () => void): () => void {
 }
 
 const InSheetContext = createContext(false);
+const UnderSheetContext = createContext(false);
 
 // Wraps the export sheet's content: marks the page under it as covered for as long as the sheet is mounted
 export function SheetCover({ children }: { children: ReactNode }) {
@@ -155,12 +145,20 @@ export function SheetCover({ children }: { children: ReactNode }) {
   return <InSheetContext value>{children}</InSheetContext>;
 }
 
-// True for an element of the page under the open sheet: it was on screen before the sheet opened and is not in the sheet
+// Wraps a page loaded with the export sheet already over it (the export route): covered by it while it is open,
+// though its elements come on screen after the sheet does
+export function UnderSheet({ children }: { children: ReactNode }) {
+  return <UnderSheetContext value>{children}</UnderSheetContext>;
+}
+
+// True for an element of the page under the open sheet: it was on screen before the sheet opened (or is under it from
+// the start, UnderSheet) and is not in the sheet
 function useCoveredBySheet(): boolean {
   const inSheet = useContext(InSheetContext);
+  const underSheet = useContext(UnderSheetContext);
   const sheet = useSyncExternalStore(subscribeToSheet, () => openSheet, () => null);
   const [sheetAtMount] = useState(() => openSheet);
-  return sheet !== null && !inSheet && sheetAtMount !== sheet;
+  return sheet !== null && !inSheet && (underSheet || sheetAtMount !== sheet);
 }
 
 interface SharedTransitionProps {
