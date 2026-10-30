@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadCheckView, loadMapView, mapHref, neighbourCodes, resolveMapWell } from '../app/utils/routeRecords.ts';
+import { checkViewImages, loadCheckView, loadMapView, mapHref, neighbourCodes, resolveMapWell } from '../app/utils/routeRecords.ts';
 
 /* ─── Map page ──────────────────────────────────────────────────── */
 
@@ -143,4 +143,10 @@ test('check: once the well is known, its map, wells and timeline are all asked f
   };
   await loadCheckView('SW-2026-A002');
   assert.deepEqual(asked.slice(1).sort(), ['/tasks/done', '/wells/2/timeline', '/wells?taskId=done']);
+});
+
+test('check: its photos are its captures, then the well\'s surroundings behind the page', async () => {
+  backend({ '/wells/code/SW-2026-A002': wellView(2, 'SW-2026-A002'), '/tasks/done': backendTask('done', 'completed'), '/wells?taskId=done': [], '/wells/2/timeline': timeline });
+  const view = await loadCheckView('SW-2026-A002');
+  assert.deepEqual(checkViewImages(view), ['/wells/9/image?size=702', '/wells/2/image?size=702', '/wells/2/image?size=1600&radius=100']);
 });

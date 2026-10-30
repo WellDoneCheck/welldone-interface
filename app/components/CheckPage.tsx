@@ -15,8 +15,8 @@ import { useCheckLink } from './useCheckView';
 import { useBackendImage } from './useBackendImage';
 import { canVerify, saveVerdict, verdictOf } from '../utils/wellVerdicts';
 import { rememberVisit } from '../utils/lastVisit';
-import type { CheckView } from '../utils/routeRecords';
-import { confidenceText, wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
+import { checkBackgroundImage, type CheckView } from '../utils/routeRecords';
+import { confidenceText, type MapWell, type Verdict } from '../utils/wells';
 
 // The info column (560 wide: a 72px well id like SW-2023-A005 needs ~530) and the compare panel (film strip + square
 // image, 972 wide and 702 tall) with at least 60px between them, scaled to fit the content area lined up with the navbar
@@ -41,14 +41,9 @@ const VERDICTS: { verdict: Verdict; label: string; color: string }[] = [
 
 /* ─── Background ────────────────────────────────────────────────── */
 
-// The well's surroundings from its own map: this many metres each way around it, at this many px (enough to cover the
-// page once darkened and softened)
-const BACKGROUND_RADIUS = 100;
-const BACKGROUND_SIZE = 1600;
-
 // The well's surroundings, faded in over the stock aerial photo once read (the photo stays where there are none)
 function Background({ well }: { well: MapWell }) {
-  const photo = useBackendImage(wellImageUrl(well, BACKGROUND_SIZE, BACKGROUND_RADIUS));
+  const photo = useBackendImage(checkBackgroundImage(well));
   const [loaded, setLoaded] = useState(false);
   return (
     <PageBackgroundTransition>

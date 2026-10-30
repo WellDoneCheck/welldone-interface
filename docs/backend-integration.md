@@ -17,7 +17,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 | 檔案 | 做什麼 |
 | --- | --- |
 | `session.ts` | token 存在 `localStorage`（`skywell:token`），解出 `sub / username / role / isDefaultPassword / exp`；過期視同登出 |
-| `api.ts` | `api()`：帶 `Authorization: Bearer`、JSON 進出；錯誤丟 `ApiError(status, message)`（`message` 可能是字串陣列，合成一行）；401 就登出（改密碼例外）。`uploadFile()`：XHR 上傳（要進度）。`fetchFile()`：帶 header 讀圖片成 Blob（後端不收 `?token=`），元件用 `useBackendImage()` 轉成 blob URL 給 `<img>`（同一張圖同時多處顯示只讀一次：`sharedFile.ts`） |
+| `api.ts` | `api()`：帶 `Authorization: Bearer`、JSON 進出；錯誤丟 `ApiError(status, message)`（`message` 可能是字串陣列，合成一行）；401 就登出（改密碼例外）。`uploadFile()`：XHR 上傳（要進度）。`fetchFile()`：帶 header 讀圖片成 Blob（後端不收 `?token=`），元件用 `useBackendImage()` 轉成 blob URL 給 `<img>`（同一張圖同時多處顯示只讀一次：`sharedFile.ts`；檢查頁事先讀好時，它的照片也一併用 `readFileAhead()` 讀進瀏覽器快取，後端允許存一天，地圖卡片的照片與檢查頁同為 702px，飛過去時已在快取裡） |
 | `components/useBackend.ts` | 頁面讀資料的 hook：同一個 key 再回來時先顯示上次的結果、背景重讀，所以頁面轉場照舊 |
 | `components/LoadNotice.tsx` | 讀取中（載入畫面）、沒登入（登入按鈕）、失敗（錯誤訊息與「前往上傳頁面」） |
 

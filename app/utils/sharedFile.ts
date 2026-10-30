@@ -35,3 +35,9 @@ export function holdFile(path: string): { url: Promise<string>; release: () => v
   };
   return { url: file.url, release };
 }
+
+// Reads a file ahead into the browser's cache (the backend lets it keep a photo a day), so a page about to show it finds
+// it there instead of waiting for the backend; a file that cannot be read is left for that page to find out
+export function readFileAhead(path: string): void {
+  fetchFile(path).catch(() => undefined);
+}

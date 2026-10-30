@@ -2,7 +2,7 @@ import { api } from './api';
 import { toCapture, type Capture, type TimelineEntry } from './captures';
 import { pickMapTask, type Task } from './tasks';
 import { fetchImagery, type Imagery } from './tileServer';
-import { fetchWells, fetchWellViews, toMapWell, type MapWell, type WellView } from './wells';
+import { fetchWells, fetchWellViews, toMapWell, wellImageUrl, type MapWell, type WellView } from './wells';
 
 // The map and check pages read their map and well from the address in the browser, so both pages stay static (Next
 // can then prefetch them whole), and then read them from the backend
@@ -52,6 +52,17 @@ export interface CheckView {
   // the wells just before and after it in its map, by code; null at either end
   prevCode: string | null;
   nextCode: string | null;
+}
+
+// The well's surroundings the check page shows behind it, from its own map: this many metres each way around it, at
+// this many px (enough to cover the page once darkened and softened)
+const BACKGROUND_RADIUS = 100;
+const BACKGROUND_SIZE = 1600;
+export const checkBackgroundImage = (well: Pick<MapWell, 'wellId'>) => wellImageUrl(well, BACKGROUND_SIZE, BACKGROUND_RADIUS);
+
+// Every photo the check page shows: its captures first (the compare view and the film strip), then the background
+export function checkViewImages(view: Pick<CheckView, 'well' | 'captures'>): string[] {
+  return [...view.captures.map((capture) => capture.image), checkBackgroundImage(view.well)];
 }
 
 // The codes just before and after a well's among its map's wells, in code order (A009 before A010)

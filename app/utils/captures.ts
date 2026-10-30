@@ -20,7 +20,7 @@ export interface Capture {
 }
 
 // Square photos as large as the check page shows them
-const CAPTURE_IMAGE_SIZE = 702;
+export const CAPTURE_IMAGE_SIZE = 702;
 
 export function toCapture(entry: TimelineEntry): Capture {
   return { id: entry.task_id, capturedAt: taipeiDateTime(entry.task_created_at), image: wellImageUrl({ wellId: entry.well.id }, CAPTURE_IMAGE_SIZE) };

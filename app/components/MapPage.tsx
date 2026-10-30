@@ -39,6 +39,7 @@ import { canClearRecognition, canDelete, canRetry, clearRecognition, retryRecogn
 import { useSiteChrome } from './SiteChrome';
 import { TAIWAN_BOUNDS, type Imagery } from '../utils/tileServer';
 import { addWell, canAddWell, confidenceText, coordinatesText, isOnImagery, removeWell, wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
+import { CAPTURE_IMAGE_SIZE } from '../utils/captures';
 import { rememberVisit } from '../utils/lastVisit';
 import { useFitScale, type FitStage } from './useFitScale';
 import { CONTENT_TOP, FRAME_MARGIN_Y, PAGE_GAP, PAGE_GUTTER, useViewportSize } from './pageFrame';
@@ -1121,9 +1122,6 @@ function WellPhoto({ viewMode, well, shared, showing }: { viewMode: ViewMode; we
   return <ModelRender playing={showing} />;
 }
 
-// The photo as the expanded view shows it (as large as the check page's)
-const EXPANDED_PHOTO_SIZE = 702;
-
 // The aerial photo with its marker, buttons over its corner to grow it over the whole page (to zoom into) and to hide
 // the marker, and the way into the verification page (the photo itself)
 function AerialPhoto({ well, shared }: { well: MapWell; shared: boolean }) {
@@ -1132,7 +1130,7 @@ function AerialPhoto({ well, shared }: { well: MapWell; shared: boolean }) {
   const photoRef = useRef<HTMLDivElement>(null);
   const measureOrigin = useCallback(() => photoRef.current?.getBoundingClientRect() ?? null, []);
   const toggleMarker = () => setMarkerShown((shown) => !shown);
-  const capture = { id: well.recordId, capturedAt: well.timestamp, image: wellImageUrl(well, EXPANDED_PHOTO_SIZE) };
+  const capture = { id: well.recordId, capturedAt: well.timestamp, image: wellImageUrl(well, CAPTURE_IMAGE_SIZE) };
 
   return (
     // hidden in place while the expanded view stands for it
@@ -1169,7 +1167,8 @@ function AerialPhoto({ well, shared }: { well: MapWell; shared: boolean }) {
 function VerifyLink({ well, shared, markerShown }: { well: MapWell; shared: boolean; markerShown: boolean }) {
   const wellId = well.id;
   const check = useCheckLink(wellId, TO_CHECK);
-  const photo = useBackendImage(wellImageUrl(well, PHOTO_SIZE));
+  // read as large as the expanded view and the check page show it: one photo, read once, already there when it flies over
+  const photo = useBackendImage(wellImageUrl(well, CAPTURE_IMAGE_SIZE));
   return (
     <SharedTransition name={SHARED.wellPhoto} enabled={shared}>
       <Link
