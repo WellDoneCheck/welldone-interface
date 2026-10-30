@@ -58,8 +58,17 @@ export function toMapWell(well: WellView, task: Pick<Task, 'created_at'>): MapWe
   };
 }
 
-// How sure the AI was that it is a well, as the site writes it ('AI 信心度 92%'); a well added by hand was not the AI's
-export const confidenceText = (confidence: number | null) => (confidence === null ? '人工標記' : `AI 信心度 ${Math.round(confidence * 100)}%`);
+// Of the wells the AI found in these and that have been verified, the % verified to be wells (as the monitor's
+// accuracy, for one map); null while none has been verified
+export function aiAccuracy(wells: Pick<MapWell, 'verdict' | 'manual'>[]): { percent: number | null; verified: number } {
+  const judged = wells.filter((well) => !well.manual && well.verdict !== null);
+  const isWell = judged.filter((well) => well.verdict === 'well').length;
+  return { percent: judged.length === 0 ? null : Math.round((isWell / judged.length) * 1000) / 10, verified: judged.length };
+}
+
+// How sure the AI was that it is a well, as the site writes it: its 0–1 score to two decimals ('AI 辨識分數 0.92'); a well
+// added by hand was not the AI's
+export const confidenceText = (confidence: number | null) => (confidence === null ? '人工標記' : `AI 辨識分數 ${confidence.toFixed(2)}`);
 
 type Point = Pick<MapWell, 'latitude' | 'longitude'>;
 

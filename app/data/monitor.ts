@@ -6,10 +6,11 @@
 export type WellStatus = 'verified' | 'pending' | 'rejected';
 
 // Marker colors are the status colors below: verified reads as good, pending as needing a look, rejected as critical
-export const STATUS_META: Record<WellStatus, { label: string; dot: string }> = {
-  verified: { label: '已驗證', dot: 'bg-[#62A4A7]' },
-  pending: { label: '待確認', dot: 'bg-[#E0B24A]' },
-  rejected: { label: '不是井', dot: 'bg-[#E5534B]' },
+// (color is the same as dot, for drawing in SVG)
+export const STATUS_META: Record<WellStatus, { label: string; dot: string; color: string }> = {
+  verified: { label: '已驗證', dot: 'bg-[#62A4A7]', color: '#62A4A7' },
+  pending: { label: '待確認', dot: 'bg-[#E0B24A]', color: '#E0B24A' },
+  rejected: { label: '不是井', dot: 'bg-[#E5534B]', color: '#E5534B' },
 };
 
 /* ─── Status levels ─────────────────────────────────────────────── */
@@ -28,6 +29,7 @@ export const LEVEL_META: Record<Level, { label: string; color: string }> = {
 
 export const WELL_TOTALS: Record<WellStatus, number> = { verified: 1284, pending: 96, rejected: 13 };
 export const RECOGNITION_ACCURACY = 97.3;
+export const ACCURACY_SAMPLE = 1000;
 export const VERIFIED_THIS_WEEK = 37;
 
 export interface WellMarker {
@@ -41,14 +43,24 @@ export interface WellMarker {
   confidence: number | null;
 }
 
-/* ─── Trend ─────────────────────────────────────────────────────── */
+/* ─── Wells per map ─────────────────────────────────────────────── */
 
-export const TREND_TARGET = 45;
-export const TREND_FIRST_DAY = '2026-08-23';
-// Wells verified per day over the last 30 days
-export const TREND: number[] = Array.from({ length: 30 }, (_, day) =>
-  Math.round(38 + 14 * Math.sin(day / 3.1) + 9 * Math.sin(day / 1.3)),
-);
+export interface MapWells extends Record<WellStatus, number> {
+  taskId: string;
+  // the well codes' year and the map's letter in it (SW-2026-A001: 2026, 1 = A)
+  year: number;
+  series: number;
+}
+
+// One map a year, oldest first; they add up to WELL_TOTALS
+export const MAPS: MapWells[] = [
+  { taskId: 'map-2021-a', year: 2021, series: 1, verified: 180, pending: 0, rejected: 2 },
+  { taskId: 'map-2022-a', year: 2022, series: 1, verified: 196, pending: 0, rejected: 1 },
+  { taskId: 'map-2023-a', year: 2023, series: 1, verified: 214, pending: 0, rejected: 3 },
+  { taskId: 'map-2024-a', year: 2024, series: 1, verified: 228, pending: 0, rejected: 2 },
+  { taskId: 'map-2025-a', year: 2025, series: 1, verified: 241, pending: 4, rejected: 3 },
+  { taskId: 'map-2026-a', year: 2026, series: 1, verified: 225, pending: 92, rejected: 2 },
+];
 
 /* ─── Tasks ─────────────────────────────────────────────────────── */
 

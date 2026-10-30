@@ -1,6 +1,6 @@
 'use client';
 
-import { addTransitionType, startTransition, useEffect, useMemo, useRef, useState } from 'react';
+import { addTransitionType, startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useWellVerdicts } from './useWellVerdicts';
 import { canVerify, lookOf, saveVerdict, verdictOf, type VerdictLook } from '../utils/wellVerdicts';
 import Image from 'next/image';
@@ -11,7 +11,8 @@ import LoadNotice from './LoadNotice';
 import { useSiteChrome } from './SiteChrome';
 import { useMapView } from './useMapView';
 import { usePageSearchParams } from './usePageSearchParams';
-import { wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
+import { aiAccuracy, wellImageUrl, type MapWell, type Verdict } from '../utils/wells';
+import { accuracyText } from '../utils/monitorStats';
 import { buildWellsCsv } from '../utils/wellsCsv';
 import { downloadCsv } from '../utils/csv';
 import { useCheckLink } from './useCheckView';
@@ -74,14 +75,34 @@ function SelectCircle({ checked, size, label, onToggle }: { checked: boolean; si
 
 /* ─── Hero summary ──────────────────────────────────────────────── */
 
-function CountColumn({ count, countColor, label }: { count: number; countColor: string; label: string }) {
+interface CountColumnProps {
+  count: ReactNode;
+  countColor: string;
+  // under the figure: what it counts in
+  unit: string;
+  label: string;
+}
+
+function CountColumn({ count, countColor, unit, label }: CountColumnProps) {
   return (
-    <div className="flex w-[300px] flex-col items-center pt-[48px] font-bold text-[#2C322F]">
+    <div className="flex w-[240px] flex-col items-center pt-[48px] font-bold text-[#2C322F]">
       <p className={`text-[64px] leading-none ${countColor}`}>{count}</p>
-      <p className="mt-[14px] text-[28px] leading-[normal]">口井</p>
+      <p className="mt-[14px] text-[28px] leading-[normal]">{unit}</p>
       <p className="mt-[40px] text-[20px] leading-[normal]">{label}</p>
     </div>
   );
+}
+
+// This map's accuracy, beside its counts: '—' while none of the AI's wells has been verified
+function AccuracyColumn({ accuracy }: { accuracy: ReturnType<typeof aiAccuracy> }) {
+  const percent = (
+    <>
+      {accuracyText(accuracy.percent)}
+      {accuracy.percent !== null && <span className="ml-1 text-[32px]">%</span>}
+    </>
+  );
+  const unit = accuracy.verified > 0 ? `已驗證 ${accuracy.verified} 口` : '尚無已驗證';
+  return <CountColumn count={percent} countColor="text-[#2C322F]" unit={unit} label="辨識準確率 Accuracy" />;
 }
 
 function ExportAction({ selectedCount, onExport }: { selectedCount: number; onExport: () => void }) {
@@ -105,12 +126,13 @@ function ExportAction({ selectedCount, onExport }: { selectedCount: number; onEx
 
 interface HeroSummaryProps {
   counts: Record<SectionKind, number>;
+  accuracy: ReturnType<typeof aiAccuracy>;
   selectedCount: number;
   onExport: () => void;
 }
 
 // On the sheet's plain paper: white with a soft shadow
-function HeroSummary({ counts, selectedCount, onExport }: HeroSummaryProps) {
+function HeroSummary({ counts, accuracy, selectedCount, onExport }: HeroSummaryProps) {
   return (
     <div className="relative mx-[60px] flex h-[340px] bg-white shadow-[8px_8px_40px_0_rgba(0,0,0,0.12)]">
       <div className="flex w-[449px] flex-col justify-between pb-[48px] pl-[64px] pt-[48px] font-bold text-[#2C322F]">
@@ -118,8 +140,9 @@ function HeroSummary({ counts, selectedCount, onExport }: HeroSummaryProps) {
         <h1 className="text-[36px] leading-[normal]">資料匯出</h1>
       </div>
       {SECTION_ORDER.map((kind) => (
-        <CountColumn key={kind} count={counts[kind]} countColor={SECTIONS[kind].countColor} label={SECTIONS[kind].count} />
+        <CountColumn key={kind} count={counts[kind]} countColor={SECTIONS[kind].countColor} unit="口井" label={SECTIONS[kind].count} />
       ))}
+      <AccuracyColumn accuracy={accuracy} />
       <ExportAction selectedCount={selectedCount} onExport={onExport} />
     </div>
   );
@@ -410,6 +433,7 @@ export default function ExportPage() {
       <div className="relative mx-auto w-[1920px] pb-[160px]" style={{ zoom: scale, paddingTop: TOP_SPACE }}>
         <HeroSummary
           counts={{ well: wellsOf('well').length, 'not-well': wellsOf('not-well').length, pending: wellsOf('pending').length }}
+          accuracy={aiAccuracy(wells)}
           selectedCount={selectedIds.size}
           onExport={() => downloadCsv(CSV_FILE_NAME, buildWellsCsv(wells.filter((well) => selectedIds.has(well.id))))}
         />

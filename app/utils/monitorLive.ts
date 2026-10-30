@@ -1,5 +1,6 @@
 // The monitor page's live state and how it changes from one update to the next. Simulated until the backend sends
 // real figures: each update nudges the services' load, moves the running batch on, and logs what happened as events.
+// Once logged in the services are the backend's checks instead (utils/monitorServices.ts).
 import { EVENTS, SERVICES, TASKS, WELL_TOTALS, type Level, type MonitorTask, type WellStatus } from '../data/monitor';
 import { givenName, importName, type RecordStatus, type TaskRecord } from './tasks';
 
@@ -16,11 +17,13 @@ const MINUTE = 60 * 1000;
 export interface LiveService {
   name: string;
   code: string;
+  // answers its health check
+  up: boolean;
   cpuBase: number;
-  // oldest first; the last one is the current reading
+  // oldest first; the last one is the current reading; empty while its load is unknown
   cpu: number[];
-  memoryUsedGb: number;
-  memoryTotalGb: number;
+  // null while unknown
+  memory: { usedGb: number; totalGb: number } | null;
 }
 
 export interface LiveTask extends Omit<MonitorTask, 'createdMinutesAgo'> {
@@ -71,7 +74,12 @@ export function createSnapshot(now: number): MonitorSnapshot {
   return {
     now,
     totals: { ...WELL_TOTALS },
-    services: SERVICES.map((service) => ({ ...service, cpu: initialCpu(service.cpuBase) })),
+    services: SERVICES.map(({ memoryUsedGb, memoryTotalGb, ...service }) => ({
+      ...service,
+      up: true,
+      cpu: initialCpu(service.cpuBase),
+      memory: { usedGb: memoryUsedGb, totalGb: memoryTotalGb },
+    })),
     tasks,
     events: EVENTS.map(({ minutesAgo, taskId, ...event }) => ({ ...event, task: aboutTask(taskId), at: now - minutesAgo * MINUTE })),
     nextEventNumber: EVENTS.length + 1,
@@ -130,12 +138,14 @@ export function loadLevel(percent: number): Level {
   return 'good';
 }
 
-export const currentCpu = (service: LiveService) => service.cpu[service.cpu.length - 1];
-export const memoryPercent = (service: LiveService) => (service.memoryUsedGb / service.memoryTotalGb) * 100;
+export const currentCpu = (service: LiveService): number | null => service.cpu.at(-1) ?? null;
+export const memoryPercent = (service: LiveService): number | null =>
+  service.memory && (service.memory.usedGb / service.memory.totalGb) * 100;
 
-// The worse of the service's CPU and memory load
+// Down is critical; otherwise the worse of the service's CPU and memory load, of those known
 export function serviceLevel(service: LiveService): Level {
-  const levels = [loadLevel(currentCpu(service)), loadLevel(memoryPercent(service))];
+  if (!service.up) return 'critical';
+  const levels = [currentCpu(service), memoryPercent(service)].filter((load) => load !== null).map(loadLevel);
   return levels.includes('critical') ? 'critical' : levels.includes('warning') ? 'warning' : 'good';
 }
 
@@ -170,10 +180,13 @@ type NewEvent = Omit<LiveEvent, 'id' | 'at'>;
 
 // Drifts around the service's usual load, a little each update
 function nextService(service: LiveService, random: Random): LiveService {
-  const last = currentCpu(service);
+  const last = currentCpu(service) ?? service.cpuBase;
   const cpu = round1(clamp(last + (random() - 0.5) * 10 + (service.cpuBase - last) * 0.2, 3, 99));
-  const memoryUsedGb = Math.round(clamp(service.memoryUsedGb * (0.98 + random() * 0.04), 0.05, service.memoryTotalGb) * 100) / 100;
-  return { ...service, cpu: [...service.cpu.slice(1), cpu], memoryUsedGb };
+  const memory = service.memory && {
+    ...service.memory,
+    usedGb: Math.round(clamp(service.memory.usedGb * (0.98 + random() * 0.04), 0.05, service.memory.totalGb) * 100) / 100,
+  };
+  return { ...service, cpu: [...service.cpu.slice(1), cpu], memory };
 }
 
 // Logs a service getting busier or calming down
@@ -181,7 +194,7 @@ function loadEvent(before: LiveService, after: LiveService): NewEvent | null {
   const from = serviceLevel(before);
   const to = serviceLevel(after);
   if (from === to) return null;
-  const detail = `CPU ${currentCpu(after)}%・記憶體 ${Math.round(memoryPercent(after))}%`;
+  const detail = `CPU ${currentCpu(after)}%・記憶體 ${Math.round(memoryPercent(after) ?? 0)}%`;
   if (to === 'critical') return { level: 'critical', title: `服務過載：${after.name}`, detail };
   if (to === 'warning' && from === 'good') return { level: 'warning', title: `負載偏高：${after.name}`, detail };
   if (to === 'good') return { level: 'good', title: `負載恢復正常：${after.name}`, detail };

@@ -108,9 +108,16 @@ test('load levels: below 80% fine, from 80% a look, from 90% overloaded', () => 
 });
 
 test('a service is as bad as the worse of its CPU and memory', () => {
-  const service = { cpu: [20], memoryUsedGb: 3.7, memoryTotalGb: 4 };
+  const service = { up: true, cpu: [20], memory: { usedGb: 3.7, totalGb: 4 } };
   assert.equal(serviceLevel(service), 'critical');
-  assert.equal(serviceLevel({ ...service, memoryUsedGb: 1 }), 'good');
+  assert.equal(serviceLevel({ ...service, memory: { usedGb: 1, totalGb: 4 } }), 'good');
+});
+
+test('a service that is down is critical; an unknown load does not count', () => {
+  assert.equal(serviceLevel({ up: false, cpu: [], memory: null }), 'critical');
+  assert.equal(serviceLevel({ up: true, cpu: [], memory: null }), 'good');
+  assert.equal(serviceLevel({ up: true, cpu: [85], memory: null }), 'warning');
+  assert.equal(currentCpu({ cpu: [] }), null);
 });
 
 test('the system needs a look while a batch has failed, and counts it', () => {
@@ -129,7 +136,7 @@ test('each update adds one CPU reading per service, within 0–100%', () => {
   for (const service of snapshot.services) {
     assert.equal(service.cpu.length, CPU_HISTORY_LENGTH);
     assert.ok(currentCpu(service) >= 0 && currentCpu(service) <= 100);
-    assert.ok(service.memoryUsedGb <= service.memoryTotalGb);
+    assert.ok(service.memory.usedGb <= service.memory.totalGb);
   }
 });
 

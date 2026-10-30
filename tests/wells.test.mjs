@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addWell, canAddWell, removeWell, confidenceText, coordinatesText, isOnImagery, toMapWell, toWebMercator, wellImageUrl } from '../app/utils/wells.ts';
+import { addWell, aiAccuracy, canAddWell, removeWell, confidenceText, coordinatesText, isOnImagery, toMapWell, toWebMercator, wellImageUrl } from '../app/utils/wells.ts';
 
 const view = { id: 7, code: 'SW-2026-A007', task_id: 'task-1', verdict: 'well', confidence: 0.9, source: 'ai', latitude: 23.830123, longitude: 120.460234 };
 
@@ -58,7 +58,19 @@ test('a well added by hand is posted to its map and verified as a well, and only
 });
 
 test('the AI\'s confidence shows as a percentage; a well added by hand says so instead', () => {
-  assert.equal(confidenceText(0.9234), 'AI 信心度 92%');
-  assert.equal(confidenceText(1), 'AI 信心度 100%');
+  assert.equal(confidenceText(0.9234), 'AI 辨識分數 0.92');
+  assert.equal(confidenceText(0.5), 'AI 辨識分數 0.50');
+  assert.equal(confidenceText(1), 'AI 辨識分數 1.00');
   assert.equal(confidenceText(null), '人工標記');
+});
+
+test("a map's accuracy counts only the AI's wells that have been verified", () => {
+  const well = (verdict, manual = false) => ({ verdict, manual });
+  const wells = [well('well'), well('well'), well('well'), well('not-well'), well(null), well('not-well', true)];
+  assert.deepEqual(aiAccuracy(wells), { percent: 75, verified: 4 });
+  assert.deepEqual(aiAccuracy([well('well'), well('not-well'), well('not-well')]), { percent: 33.3, verified: 3 });
+});
+
+test('a map none of whose AI wells has been verified has no accuracy', () => {
+  assert.deepEqual(aiAccuracy([{ verdict: null, manual: false }, { verdict: 'well', manual: true }]), { percent: null, verified: 0 });
 });

@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { useState, type CSSProperties, type ReactNode } from 'react';
-import TrendChart from './TrendChart';
+import MapWellsChart from './MapWellsChart';
 import InlineNameInput from './InlineNameInput';
 import SharedTransition, { ONLY_TO_MONITOR, SHARED } from './SharedTransition';
 import {
   LEVEL_META,
+  STATUS_META,
   TASK_META,
-  TREND_TARGET,
   type Level,
 } from '../data/monitor';
 import { accuracyText, type MonitorStats } from '../utils/monitorStats';
@@ -272,7 +272,7 @@ export function StatTiles({ stats }: { stats: MonitorStats }) {
       <StatTile label="判定不是井" note="已排除">
         {totals.rejected.toLocaleString()}
       </StatTile>
-      <StatTile label="辨識準確率" note="近 30 天">
+      <StatTile label="辨識準確率" note={stats.accuracySample > 0 ? `已驗證 ${stats.accuracySample.toLocaleString()} 口` : '尚無已驗證'}>
         {/* the home page's big figure flies in here */}
         <SharedTransition name={SHARED.recognitionAccuracy} share={ONLY_TO_MONITOR}>
           <p className="w-fit">
@@ -286,23 +286,26 @@ export function StatTiles({ stats }: { stats: MonitorStats }) {
   );
 }
 
-/* ─── Trend ─────────────────────────────────────────────────────── */
+/* ─── Wells per map ─────────────────────────────────────────────── */
 
-export function TrendPanel({ trend }: { trend: MonitorStats['trend'] }) {
+export function MapWellsPanel({ maps }: { maps: MonitorStats['maps'] }) {
   return (
     <Panel
-      title="每日驗證數"
+      title="各地圖水井數"
       className="h-[180px] shrink-0"
       meta={
-        <span className="inline-flex items-center gap-2">
-          近 30 天
-          <span className="inline-block w-4 border-t border-dashed border-[#2C322F]/50" />
-          目標 {TREND_TARGET} 口／日
+        <span className="inline-flex items-center gap-3">
+          {(['verified', 'pending', 'rejected'] as const).map((status) => (
+            <span key={status} className="inline-flex items-center gap-1.5">
+              <span className={`h-2 w-2 ${STATUS_META[status].dot}`} />
+              {STATUS_META[status].label}
+            </span>
+          ))}
         </span>
       }
     >
       <div className="px-5 pb-3">
-        <TrendChart data={trend.counts} target={TREND_TARGET} firstDay={trend.firstDay} />
+        <MapWellsChart maps={maps} />
       </div>
     </Panel>
   );
@@ -313,7 +316,12 @@ export function TrendPanel({ trend }: { trend: MonitorStats['trend'] }) {
 const SERVICE_LABEL: Record<Level, string> = { good: '正常', info: '正常', warning: '偏高', critical: '過載' };
 const SERVICE_COLUMNS = 'grid grid-cols-[1fr_64px_148px_128px] items-center gap-4';
 
+// '—' where its load is unknown (down, or not read from Docker)
+const UNKNOWN = <span className={`text-right text-[13px] ${MUTED}`}>—</span>;
+
 function ServiceRow({ service }: { service: LiveService }) {
+  const level = serviceLevel(service);
+  const cpu = currentCpu(service);
   const memory = memoryPercent(service);
   return (
     <li className={`${SERVICE_COLUMNS} border-t ${RULE} px-5 py-1.5`}>
@@ -321,17 +329,25 @@ function ServiceRow({ service }: { service: LiveService }) {
         <p className={`truncate text-sm ${INK}`}>{service.name}</p>
         <p className={`truncate text-[11px] ${MUTED}`}>{service.code}</p>
       </div>
-      <LevelTag level={serviceLevel(service)} label={SERVICE_LABEL[serviceLevel(service)]} />
-      <div className="flex items-center gap-2.5">
-        <Sparkline values={service.cpu} threshold={LOAD_WARNING} />
-        <span className={`w-[46px] text-right text-[13px] tabular-nums ${INK}`}>{currentCpu(service).toFixed(1)}%</span>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <span className={`text-right text-[12px] tabular-nums ${INK_2}`}>
-          {service.memoryUsedGb.toFixed(2)} / {service.memoryTotalGb} GB
-        </span>
-        <Meter percent={memory} color={LEVEL_META[loadLevel(memory)].color} label={`${service.name}記憶體使用率`} />
-      </div>
+      <LevelTag level={level} label={service.up ? SERVICE_LABEL[level] : '離線'} />
+      {cpu === null ? (
+        UNKNOWN
+      ) : (
+        <div className="flex items-center gap-2.5">
+          <Sparkline values={service.cpu} threshold={LOAD_WARNING} />
+          <span className={`w-[46px] text-right text-[13px] tabular-nums ${INK}`}>{cpu.toFixed(1)}%</span>
+        </div>
+      )}
+      {service.memory === null || memory === null ? (
+        UNKNOWN
+      ) : (
+        <div className="flex flex-col gap-1.5">
+          <span className={`text-right text-[12px] tabular-nums ${INK_2}`}>
+            {service.memory.usedGb.toFixed(2)} / {service.memory.totalGb} GB
+          </span>
+          <Meter percent={memory} color={LEVEL_META[loadLevel(memory)].color} label={`${service.name}記憶體使用率`} />
+        </div>
+      )}
     </li>
   );
 }
@@ -339,7 +355,7 @@ function ServiceRow({ service }: { service: LiveService }) {
 export function ServicesPanel({ services }: { services: LiveService[] }) {
   const needsLook = services.filter((service) => serviceLevel(service) !== 'good').length;
   return (
-    <Panel title="服務健康" meta={needsLook > 0 ? `${needsLook} 項負載偏高` : `${services.length} 項服務皆正常`} className="flex-1">
+    <Panel title="服務健康" meta={needsLook > 0 ? `${needsLook} 項需要注意` : `${services.length} 項服務皆正常`} className="flex-1">
       <div className={`${SERVICE_COLUMNS} px-5 pb-2 text-[11px] ${MUTED}`}>
         <span>服務</span>
         <span>狀態</span>
@@ -399,8 +415,18 @@ function PencilIcon() {
   );
 }
 
-// onRename: renaming the task (left out, e.g. before logging in: no pencil)
-function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRename?: (id: string, name: string) => void }) {
+interface TaskRowProps {
+  task: LiveTask;
+  now: number;
+  // its map is the one on the monitor map
+  selected: boolean;
+  // shows its map on the monitor map (left out, e.g. before logging in: the name goes to the upload page instead)
+  onSelect?: (id: string) => void;
+  // renaming the task (left out, e.g. before logging in: no pencil)
+  onRename?: (id: string, name: string) => void;
+}
+
+function TaskRow({ task, now, selected, onSelect, onRename }: TaskRowProps) {
   const [editing, setEditing] = useState(false);
   const name = taskName(task);
 
@@ -410,7 +436,7 @@ function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRenam
   };
 
   return (
-    <li className={`group/task border-t ${RULE} px-5 py-3 transition-colors duration-300 hover:bg-[#2C322F]/[0.04]`}>
+    <li className={`group/task border-t ${RULE} px-5 py-3 transition-colors duration-300 ${selected ? 'bg-[#62A4A7]/[0.12]' : 'hover:bg-[#2C322F]/[0.04]'}`}>
       <div className="flex items-center gap-2.5">
         <TaskIcon task={task} />
         {editing ? (
@@ -424,9 +450,21 @@ function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRenam
         ) : (
           <>
             {/* a default name comes from the time, which may differ by a minute between the server and the browser */}
-            <Link href="/upload" suppressHydrationWarning className={`min-w-0 truncate text-sm outline-none hover:underline focus-visible:underline ${INK}`}>
-              {name}
-            </Link>
+            {onSelect ? (
+              <button
+                type="button"
+                aria-pressed={selected}
+                onClick={() => onSelect(task.id)}
+                suppressHydrationWarning
+                className={`min-w-0 truncate text-left text-sm outline-none hover:underline focus-visible:underline ${INK} ${selected ? 'font-bold' : ''}`}
+              >
+                {name}
+              </button>
+            ) : (
+              <Link href="/upload" suppressHydrationWarning className={`min-w-0 truncate text-sm outline-none hover:underline focus-visible:underline ${INK}`}>
+                {name}
+              </Link>
+            )}
             {onRename && (
               <button
                 type="button"
@@ -453,16 +491,19 @@ function TaskRow({ task, now, onRename }: { task: LiveTask; now: number; onRenam
 interface TasksPanelProps {
   tasks: LiveTask[];
   now: number;
+  // the task whose map is on the monitor map, and picking another (TaskRow)
+  selectedId?: string;
+  onSelect?: (id: string) => void;
   onRename?: (id: string, name: string) => void;
 }
 
-export function TasksPanel({ tasks, now, onRename }: TasksPanelProps) {
+export function TasksPanel({ tasks, now, selectedId, onSelect, onRename }: TasksPanelProps) {
   const count = (state: LiveTask['state']) => tasks.filter((task) => task.state === state).length;
   return (
     <Panel title="辨識任務" meta={`辨識中 ${count('running')}・排隊 ${count('queued')}・失敗 ${count('failed')}`} className="h-[382px] shrink-0">
       <ul className="min-h-0 flex-1 overflow-y-auto [scrollbar-color:rgba(44,50,47,0.2)_transparent] [scrollbar-width:thin]">
         {tasks.map((task) => (
-          <TaskRow key={task.id} task={task} now={now} onRename={onRename} />
+          <TaskRow key={task.id} task={task} now={now} selected={task.id === selectedId} onSelect={onSelect} onRename={onRename} />
         ))}
       </ul>
     </Panel>

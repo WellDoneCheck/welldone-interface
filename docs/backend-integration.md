@@ -29,14 +29,14 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 | 帳號管理 | `GET/POST /users`、`PATCH /users/:id/role`、`PATCH /users/:id/reset-password`、`DELETE /users/:id` | `usersApi.ts`、`UserManagementPage` |
 | 伺服器日誌（只有 root；用戶選單「伺服器日誌」） | `GET /server-logs/:source`（`backend`／`splitter` 最新月檔；先讀檔尾，之後每 3 秒帶上次的 `file`、`after` 只拿新寫入的行；`q` 關鍵字、`level=warn|error` 由後端篩選）、`GET /server-logs/:source/file`（下載整個月檔） | `serverLogs.ts`、`useServerLog`、`ServerLogsPage` |
 | 影像匯入 | `GET /tasks`、`GET /tasks/:id/progress`（`no-store` 輪詢，見 §5 #1）、分片上傳（見 §6）、`PATCH /tasks/:id/name`、`DELETE /tasks/:id`、`POST /tasks/:id/ai/retry`（「重試辨識」：辨識停下且還有失敗或沒跑到的小圖時，不帶 body 全部重試；地圖頁點「等待辨識」的灰色小圖可帶 `{ tiles: [{ row, col }] }` 只重試那格）、`DELETE /tasks/:id/ai/tiles/:row/:col`（「清除辨識結果」：辨識停下後，admin / root 在地圖頁右鍵點已辨識的小圖，刪掉那格 AI 的水井（含已驗證的，手動標記的保留），小圖回到等待辨識、可再點它重試） | `useTaskRecords`、`UploadPage`、`MapPage`、`chunkedUpload.ts` |
-| 地圖檢視 | `GET /tasks`（`?record=` 或最新完成的）、`GET /wells?taskId=`、`GET /tasks/:id/tiles/tilejson` 與圖磚、`GET /wells/:id/image`；卡片時間下方顯示 AI 信心度（`confidence`，手動新增的顯示「人工標記」），旁邊的「是井／不是井」直接 `PATCH /wells/:id/verdict`（viewer 只能看）；「新增水井」（合法井比對旁，operator / admin，有影像才顯示）按下後點地圖影像上的位置、確認後 `POST /wells`（`{ taskId, e, n }`，座標由前端把經緯度換成 EPSG:3857 公尺），接著 `PATCH /wells/:id/verdict` 標成「是井」（人工放的就是井），重讀 `GET /wells?taskId=` 並打開新井的卡片；手動新增的井（`source: manual`）在圖釘上按右鍵可刪除（按兩次確認，`DELETE /wells/:id`；權限同刪地圖，operator 限自己上傳的地圖） | `routeRecords.ts` 的 `loadMapView`、`MapPage`、`PinEntry`、`TileMap`、`wells.ts` |
+| 地圖檢視 | `GET /tasks`（`?record=` 或最新完成的）、`GET /wells?taskId=`、`GET /tasks/:id/tiles/tilejson` 與圖磚、`GET /wells/:id/image`；卡片時間下方顯示 AI 辨識分數（`confidence`，0–1 取兩位小數，如 0.92；手動新增的顯示「人工標記」），旁邊的「是井／不是井」直接 `PATCH /wells/:id/verdict`（viewer 只能看）；「新增水井」（合法井比對旁，operator / admin，有影像才顯示）按下後點地圖影像上的位置、確認後 `POST /wells`（`{ taskId, e, n }`，座標由前端把經緯度換成 EPSG:3857 公尺），接著 `PATCH /wells/:id/verdict` 標成「是井」（人工放的就是井），重讀 `GET /wells?taskId=` 並打開新井的卡片；手動新增的井（`source: manual`）在圖釘上按右鍵可刪除（按兩次確認，`DELETE /wells/:id`；權限同刪地圖，operator 限自己上傳的地圖） | `routeRecords.ts` 的 `loadMapView`、`MapPage`、`PinEntry`、`TileMap`、`wells.ts` |
 | 地圖上的小圖進度：切圖中已切好的直接顯示影像、旁邊還沒切到的標灰色；切完標出還沒辨識完的（辨識中閃動、失敗、等待辨識）；切完自動載入影像 | `GET /tasks/:id`（`split_status`）、`GET /tasks/:id/tiles/cut`（格線、已切好與空白的小圖、整張影像範圍、已切好部分的圖磚網址；後端新增）、`GET /tasks/:id/tiles/cut/{z}/{x}/{y}.png`（後端新增）、`GET /tasks/:id/ai/progress`，每 5 秒直到辨識結束；每多辨識完小圖就重讀 `GET /wells?taskId=`，地圖的圖釘與左下角的數字跟著更新；切完讀 `tilejson` | `tileProgress.ts`、`useTileProgressLayer`、`useRecognisedWells`、`useCutImagery`、`MapPage` 的圖例 |
 | 地圖名稱改名（地圖、檢查、比對頁） | `PATCH /tasks/:id/name`（空白＝回到預設名稱） | `RecordName` |
 | 水井檢查 | `GET /wells/code/:code`，接著 `GET /tasks/:id`、`GET /wells?taskId=`、`GET /wells/:id/timeline` 同時讀（每期的照片用 `/wells/:id/image`）、`PATCH /wells/:id/verdict` | `loadCheckView`、`CheckPage`、`TimelineCompare` |
-| 資料匯出 | 同地圖檢視的水井（`/export?record=`，沒有就最新完成的）、`PATCH /wells/:id/verdict`；勾選的水井 CSV 由前端產生 | `ExportPage` |
+| 資料匯出 | 同地圖檢視的水井（`/export?record=`，沒有就最新完成的）、`PATCH /wells/:id/verdict`；勾選的水井 CSV 由前端產生；摘要的「辨識準確率」由前端以這張地圖的水井算（AI 找到且已驗證者中是井的比例，人工加的不算） | `ExportPage` |
 | 合法井比對 | `GET /tasks/:id/well-registry/source`、`POST …/import`、`POST …/match`（放開滑桿時送）、`GET …/comparison`、`PATCH /wells/:id/to-register` | `wellRegistry.ts`、`ComparePage` |
 | 導覽列「上次造訪」 | `GET /me/last-visits`、`PUT /me/last-visits/:page` | `lastVisit.ts` |
-| 監控總覽 | `GET /monitor/stats`（數字、準確率、30 天趨勢）；辨識任務是 `GET /tasks` 與進度（同影像匯入，改名 `PATCH /tasks/:id/name`）；地圖面板是最新完成地圖的水井與影像 | `monitorStats.ts`、`useMonitorStats`、`monitorLive.ts` 的 `liveTask`、`MonitorPage` |
+| 監控總覽 | `GET /monitor/stats`（數字、準確率與其已驗證口數、最新 12 張地圖各自的水井數）；服務健康是 `GET /monitor/services`（每 5 秒實際連線檢查各服務，CPU／記憶體由後端從 Docker 讀；CPU 曲線是前端累積的近幾次讀數，讀不到用量時顯示「—」，連不上顯示「離線」；面板只放得下 5 列，後端回的 Redis 不顯示）；辨識任務是 `GET /tasks` 與進度（同影像匯入，改名 `PATCH /tasks/:id/name`）；地圖面板是辨識任務中點選的那張地圖（還沒點選時是最新完成的）的水井與影像；登入後點任務名稱只換地圖面板，不離開監控頁 | `monitorStats.ts`、`useMonitorStats`、`monitorServices.ts`、`useServiceHealth`、`monitorLive.ts` 的 `liveTask`、`MonitorPage` |
 | 首頁準確率與水井數 | `GET /monitor/stats`（讀一次） | `FloatingGrid` |
 | AI 助理 Skyhi | `POST /copilot/ask`：後端從題庫找最相似的題目回答（不接 LLM），或查水井編號、經緯度、年份與地區；回答下方的按鈕連到站內頁面（點了收起助理；「前往匯出頁」「前往合法井比對」這類沒指定地圖的按鈕只在地圖、匯出、比對頁顯示，帶上目前的 `?record=`；已經在那一頁的按鈕不顯示，見 `actionsForPage`），沒把握時給建議題目（點了就送出）；呼叫失敗時把錯誤寫在回覆裡。輸入框上方的常見問題每次打開助理時向 `GET /copilot/suggestions` 要（帶目前路徑，地圖頁另帶 `?record=`），後端依頁面挑題型並帶入地圖所在的鄉鎮、年份；拿到前或連不上時顯示固定的三題。規格見 well-back `docs/COPILOT.md` | `utils/copilot.ts`、`useCopilotChat`、`CopilotWidget` |
 
@@ -45,7 +45,8 @@ operator 只能刪自己上傳的地圖；只有 root 能建帳號。
 
 ## 還是模擬資料
 
-- 監控總覽的服務狀態與事件（`app/data/monitor.ts`、`utils/monitorLive.ts`）；登入後不顯示關於模擬批次的事件。
+- 監控總覽的事件（`app/data/monitor.ts`、`utils/monitorLive.ts`）；登入後不顯示關於模擬批次的事件。
+- 沒登入時監控總覽的服務健康（後端只回應登入的使用者）。
 - 沒登入時：監控的數字與辨識任務、首頁的準確率與水井數（後端只回應登入的使用者）。
 - 地圖卡片背面的 3D 模型、各頁的背景照片。
 

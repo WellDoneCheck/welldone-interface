@@ -19,7 +19,8 @@ const PANEL_PADDING = { top: 70, bottom: 190, left: 24, right: 64 };
 const ZOOM_IN_LIMIT = 21;
 
 interface MonitorMapProps {
-  // the newest finished map's imagery (null: none yet, or logged out) and its wells
+  // the imagery of the map picked in the tasks panel, or the newest finished one (null: none yet, or logged out), and its
+  // wells
   imagery: Imagery | null;
   markers: WellMarker[];
   // wells per status, for the filter counts
@@ -200,7 +201,7 @@ function ZoomControls({ map, fit }: { map: MapLibreMap | null; fit: { bounds: Bo
   );
 }
 
-// The newest finished map's imagery (once logged in: the backend's tiles need it), dragged and zoomed inside the panel, with a marker on every well. Anyone sees the
+// The picked (or newest finished) map's imagery (once logged in: the backend's tiles need it), dragged and zoomed inside the panel, with a marker on every well. Anyone sees the
 // markers; picking one (its details, the way to verify it) asks to log in first, then picks it.
 export default function MonitorMap({ imagery, markers, totals, filter, onFilterChange, selectedId, onSelect, scale }: MonitorMapProps) {
   const [map, setMap] = useState<MapLibreMap | null>(null);
