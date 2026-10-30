@@ -2,7 +2,7 @@ import { api } from './api';
 import { toCapture, type Capture, type TimelineEntry } from './captures';
 import { pickMapTask, type Task } from './tasks';
 import { fetchImagery, type Imagery } from './tileServer';
-import { fetchWells, toMapWell, type MapWell, type WellView } from './wells';
+import { fetchWells, fetchWellViews, toMapWell, type MapWell, type WellView } from './wells';
 
 // The map and check pages read their map and well from the address in the browser, so both pages stay static (Next
 // can then prefetch them whole), and then read them from the backend
@@ -61,23 +61,33 @@ export function neighbourCodes(codes: string[], code: string): Pick<CheckView, '
   return { prevCode: sorted[index - 1] ?? null, nextCode: sorted[index + 1] ?? null };
 }
 
-// The first well of the newest finished map, when the address names none
-async function firstWell(): Promise<{ well: MapWell; task: Task }> {
-  const { task, wells } = await loadMapView(null);
-  if (!wells.length) throw new Error('最新的地圖沒有辨識到水井');
-  return { well: wells[0], task };
+// A well with its map, its map's wells and its timeline (Backend-SPEC §4.5)
+interface WellInMap {
+  well: MapWell;
+  task: Task;
+  wells: MapWell[];
+  timeline: TimelineEntry[];
 }
 
-async function wellByCode(code: string): Promise<{ well: MapWell; task: Task }> {
+const fetchTimeline = (wellId: number) => api<TimelineEntry[]>(`/wells/${wellId}/timeline`);
+
+// The first well of the newest finished map, when the address names none
+async function firstWell(): Promise<WellInMap> {
+  const { task, wells } = await loadMapView(null);
+  if (!wells.length) throw new Error('最新的地圖沒有辨識到水井');
+  return { well: wells[0], task, wells, timeline: await fetchTimeline(wells[0].wellId) };
+}
+
+// Once the well is known, its map, the map's wells and its timeline are read together
+async function wellByCode(code: string): Promise<WellInMap> {
   const view = await api<WellView>(`/wells/code/${encodeURIComponent(code)}`);
-  const task = await api<Task>(`/tasks/${view.task_id}`);
-  return { well: toMapWell(view, task), task };
+  const [task, wellViews, timeline] = await Promise.all([api<Task>(`/tasks/${view.task_id}`), fetchWellViews(view.task_id), fetchTimeline(view.id)]);
+  return { well: toMapWell(view, task), task, wells: wellViews.map((well) => toMapWell(well, task)), timeline };
 }
 
 // /check?record=<well code> checks that well; without it the first well of the newest finished map
 export async function loadCheckView(code: string | null): Promise<CheckView> {
-  const { well, task } = code ? await wellByCode(code) : await firstWell();
-  const [timeline, wells] = await Promise.all([api<TimelineEntry[]>(`/wells/${well.wellId}/timeline`), fetchWells(task)]);
+  const { well, task, wells, timeline } = code ? await wellByCode(code) : await firstWell();
   return {
     well,
     task,

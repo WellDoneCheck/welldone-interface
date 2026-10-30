@@ -123,3 +123,24 @@ test('check: an unknown well says so', async () => {
   backend({});
   await assert.rejects(loadCheckView('SW-1999-Z999'), /Not Found/);
 });
+
+test('check: once the well is known, its map, wells and timeline are all asked for before any answer', async () => {
+  const asked = [];
+  const answers = {
+    '/wells/code/SW-2026-A002': wellView(2, 'SW-2026-A002'),
+    '/tasks/done': backendTask('done', 'completed'),
+    '/wells?taskId=done': [wellView(2, 'SW-2026-A002')],
+    '/wells/2/timeline': [],
+  };
+  let answerRest;
+  const rest = new Promise((resolve) => (answerRest = resolve));
+  globalThis.fetch = async (url) => {
+    const path = new URL(url).pathname + new URL(url).search;
+    asked.push(path);
+    if (asked.length === 4) answerRest();
+    if (asked.length > 1) await rest;
+    return new Response(JSON.stringify(answers[path]), { status: 200 });
+  };
+  await loadCheckView('SW-2026-A002');
+  assert.deepEqual(asked.slice(1).sort(), ['/tasks/done', '/wells/2/timeline', '/wells?taskId=done']);
+});

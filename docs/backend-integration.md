@@ -17,7 +17,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 | 檔案 | 做什麼 |
 | --- | --- |
 | `session.ts` | token 存在 `localStorage`（`skywell:token`），解出 `sub / username / role / isDefaultPassword / exp`；過期視同登出 |
-| `api.ts` | `api()`：帶 `Authorization: Bearer`、JSON 進出；錯誤丟 `ApiError(status, message)`（`message` 可能是字串陣列，合成一行）；401 就登出（改密碼例外）。`uploadFile()`：XHR 上傳（要進度）。`fetchFile()`：帶 header 讀圖片成 Blob（後端不收 `?token=`），元件用 `useBackendImage()` 轉成 blob URL 給 `<img>` |
+| `api.ts` | `api()`：帶 `Authorization: Bearer`、JSON 進出；錯誤丟 `ApiError(status, message)`（`message` 可能是字串陣列，合成一行）；401 就登出（改密碼例外）。`uploadFile()`：XHR 上傳（要進度）。`fetchFile()`：帶 header 讀圖片成 Blob（後端不收 `?token=`），元件用 `useBackendImage()` 轉成 blob URL 給 `<img>`（同一張圖同時多處顯示只讀一次：`sharedFile.ts`） |
 | `components/useBackend.ts` | 頁面讀資料的 hook：同一個 key 再回來時先顯示上次的結果、背景重讀，所以頁面轉場照舊 |
 | `components/LoadNotice.tsx` | 讀取中（載入畫面）、沒登入（登入按鈕）、失敗（錯誤訊息與「前往上傳頁面」） |
 
@@ -32,7 +32,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 | 地圖檢視 | `GET /tasks`（`?record=` 或最新完成的）、`GET /wells?taskId=`、`GET /tasks/:id/tiles/tilejson` 與圖磚、`GET /wells/:id/image`；卡片時間下方顯示 AI 信心度（`confidence`，手動新增的顯示「人工標記」），旁邊的「是井／不是井」直接 `PATCH /wells/:id/verdict`（viewer 只能看）；「新增水井」（合法井比對旁，operator / admin，有影像才顯示）按下後點地圖影像上的位置、確認後 `POST /wells`（`{ taskId, e, n }`，座標由前端把經緯度換成 EPSG:3857 公尺），接著 `PATCH /wells/:id/verdict` 標成「是井」（人工放的就是井），重讀 `GET /wells?taskId=` 並打開新井的卡片；手動新增的井（`source: manual`）在圖釘上按右鍵可刪除（按兩次確認，`DELETE /wells/:id`；權限同刪地圖，operator 限自己上傳的地圖） | `routeRecords.ts` 的 `loadMapView`、`MapPage`、`PinEntry`、`TileMap`、`wells.ts` |
 | 地圖上的小圖進度：切圖中已切好的直接顯示影像、旁邊還沒切到的標灰色；切完標出還沒辨識完的（辨識中閃動、失敗、等待辨識）；切完自動載入影像 | `GET /tasks/:id`（`split_status`）、`GET /tasks/:id/tiles/cut`（格線、已切好與空白的小圖、整張影像範圍、已切好部分的圖磚網址；後端新增）、`GET /tasks/:id/tiles/cut/{z}/{x}/{y}.png`（後端新增）、`GET /tasks/:id/ai/progress`，每 5 秒直到辨識結束；每多辨識完小圖就重讀 `GET /wells?taskId=`，地圖的圖釘與左下角的數字跟著更新；切完讀 `tilejson` | `tileProgress.ts`、`useTileProgressLayer`、`useRecognisedWells`、`useCutImagery`、`MapPage` 的圖例 |
 | 地圖名稱改名（地圖、檢查、比對頁） | `PATCH /tasks/:id/name`（空白＝回到預設名稱） | `RecordName` |
-| 水井檢查 | `GET /wells/code/:code`、`GET /tasks/:id`、`GET /wells/:id/timeline`（每期的照片用 `/wells/:id/image`）、`PATCH /wells/:id/verdict` | `loadCheckView`、`CheckPage`、`TimelineCompare` |
+| 水井檢查 | `GET /wells/code/:code`，接著 `GET /tasks/:id`、`GET /wells?taskId=`、`GET /wells/:id/timeline` 同時讀（每期的照片用 `/wells/:id/image`）、`PATCH /wells/:id/verdict` | `loadCheckView`、`CheckPage`、`TimelineCompare` |
 | 資料匯出 | 同地圖檢視的水井（`/export?record=`，沒有就最新完成的）、`PATCH /wells/:id/verdict`；勾選的水井 CSV 由前端產生 | `ExportPage` |
 | 合法井比對 | `GET /tasks/:id/well-registry/source`、`POST …/import`、`POST …/match`（放開滑桿時送）、`GET …/comparison`、`PATCH /wells/:id/to-register` | `wellRegistry.ts`、`ComparePage` |
 | 導覽列「上次造訪」 | `GET /me/last-visits`、`PUT /me/last-visits/:page` | `lastVisit.ts` |

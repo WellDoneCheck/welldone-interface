@@ -94,8 +94,11 @@ export const removeWell = (well: Pick<MapWell, 'wellId'>) => api(`/wells/${well.
 // Viewers only look (§3)
 export const canAddWell = (role: Role) => role !== 'viewer';
 
+// A map's wells as the backend sends them
+export const fetchWellViews = (taskId: string) => api<WellView[]>(`/wells?taskId=${encodeURIComponent(taskId)}`);
+
 export async function fetchWells(task: Pick<Task, 'id' | 'created_at'>): Promise<MapWell[]> {
-  const wells = await api<WellView[]>(`/wells?taskId=${encodeURIComponent(task.id)}`);
+  const wells = await fetchWellViews(task.id);
   return wells.map((well) => toMapWell(well, task));
 }
 
