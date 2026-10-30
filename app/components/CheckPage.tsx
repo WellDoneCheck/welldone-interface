@@ -22,10 +22,16 @@ import { confidenceText, wellImageUrl, type MapWell, type Verdict } from '../uti
 // image, 972 wide and 702 tall) with at least 60px between them, scaled to fit the content area lined up with the navbar
 const PANEL_HEIGHT = 702;
 const INFO_WIDTH = 560;
-// The link back to the map sits just above the content (which starts where it does on the map page), in the navbar's
-// bottom margin, so it never covers the well id (whose line starts with some room above the letters)
-const BACK_LINK_TOP = CONTENT_TOP - BACK_LINK_HEIGHT;
-const OVERLAY_STAGE: FitStage = { width: INFO_WIDTH + 60 + 972, height: PANEL_HEIGHT, marginX: FRAME_MARGIN_X, marginY: FRAME_MARGIN_Y, minViewportWidth: 0 };
+// The link back to the map sits just under the navbar as on the other pages, and the content starts below it (as on
+// the compare page), so it never covers the well id
+const CHECK_CONTENT_TOP = CONTENT_TOP + BACK_LINK_HEIGHT + 16;
+const OVERLAY_STAGE: FitStage = {
+  width: INFO_WIDTH + 60 + 972,
+  height: PANEL_HEIGHT,
+  marginX: FRAME_MARGIN_X,
+  marginY: FRAME_MARGIN_Y + CHECK_CONTENT_TOP - CONTENT_TOP,
+  minViewportWidth: 0,
+};
 
 // 是井 in the teal a verified well wears everywhere (VERDICT_COLOR); 不是井 keeps the page's own red
 const VERDICTS: { verdict: Verdict; label: string; color: string }[] = [
@@ -176,7 +182,7 @@ function WellStepLink({ code, side }: { code: string; side: 'prev' | 'next' }) {
       aria-label={`${isPrev ? '上一口井' : '下一口井'} ${code}`}
       title={code}
       className="pointer-events-auto absolute z-10 flex size-16 -translate-x-1/2 -translate-y-1/2 items-center justify-center bg-[#2C322F]/75 text-[32px] font-bold text-white transition-colors hover:bg-[#2C322F]/90"
-      style={{ ...pagePart(`check-${side}`), top: `calc((100% + ${CONTENT_TOP - PAGE_GAP}px) / 2)`, left: isPrev ? PAGE_GUTTER / 2 : `calc(100% - ${PAGE_GUTTER / 2}px)` }}
+      style={{ ...pagePart(`check-${side}`), top: `calc((100% + ${CHECK_CONTENT_TOP - PAGE_GAP}px) / 2)`, left: isPrev ? PAGE_GUTTER / 2 : `calc(100% - ${PAGE_GUTTER / 2}px)` }}
     >
       {isPrev ? '‹' : '›'}
     </Link>
@@ -196,13 +202,13 @@ export default function CheckPage({ view }: { view: CheckView }) {
       <Background well={record} />
 
       {/* beside it, the map file the well was found in */}
-      <BackToMapLink href={backHref} transitionTypes={TO_MAP} mapFile={task} top={BACK_LINK_TOP} />
+      <BackToMapLink href={backHref} transitionTypes={TO_MAP} mapFile={task} />
 
       {prevCode && <WellStepLink code={prevCode} side="prev" />}
       {nextCode && <WellStepLink code={nextCode} side="next" />}
 
       {/* lined up with the navbar left and right, centred in the height between the navbar and the window's bottom */}
-      <div className="absolute flex items-center" style={{ ...pagePart('check-content'), top: CONTENT_TOP, bottom: PAGE_GAP, left: PAGE_GUTTER, right: PAGE_GUTTER }}>
+      <div className="absolute flex items-center" style={{ ...pagePart('check-content'), top: CHECK_CONTENT_TOP, bottom: PAGE_GAP, left: PAGE_GUTTER, right: PAGE_GUTTER }}>
         <div className="flex w-full items-stretch justify-between" style={{ height: PANEL_HEIGHT * scale }}>
           {/* well info at the top of the column, the export shortcut level with the compare panel's bottom */}
           <div className="flex flex-col justify-between">
