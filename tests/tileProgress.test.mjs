@@ -12,6 +12,7 @@ import {
   recognisedTileAt,
   recognitionFeatures,
   uncutFeatures,
+  alphaHex,
 } from '../app/utils/tileProgress.ts';
 
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-6, `${actual} ≉ ${expected}`);
@@ -153,4 +154,12 @@ test('a cut map shows the tiles still to recognise and how many are recognised',
   assert.equal(progress.retryable, false);
   assert.deepEqual(progress.recognisedTileAt(...mercatorToLngLat(1100, 4900)), { row: 0, col: 0 });
   assert.equal(again, true);
+});
+
+test('an opacity becomes the two hex digits of a colour\'s alpha, as the legend swatches had them', () => {
+  assert.equal(alphaHex(0.18), '2E');
+  assert.equal(alphaHex(0.45), '73');
+  assert.equal(alphaHex(0.35), '59');
+  assert.equal(alphaHex(0), '00');
+  assert.equal(alphaHex(1), 'FF');
 });

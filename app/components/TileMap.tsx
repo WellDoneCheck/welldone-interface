@@ -7,6 +7,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { asWebp, authorizeTile, BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM, BASEMAP_TILES, IMAGERY_TILE_SIZE, throughSite, type Imagery } from '../utils/tileServer';
 import { isLightBackdrop, reportLogoBackdrop } from '../utils/logoBackdrop';
 import type { MapCamera } from '../utils/mapCamera';
+import { onEachRest } from '../utils/mapRest';
 import type { ViewportSize } from './pageFrame';
 
 export type Bounds = [west: number, south: number, east: number, north: number];
@@ -275,26 +276,21 @@ function useDrawnAtRest(map: MapLibreMap | null, onDrawnAtRest: (() => void) | n
   const wanted = onDrawnAtRest !== null;
   useEffect(() => {
     if (!map || !wanted) return;
-    // asked: the next draw is the one asked for at rest; read: the last draw was it (so the idle that follows it asks
-    // for no other)
+    // the next draw is the one asked for at rest
     let asked = false;
-    let read = false;
     const onRender = () => {
-      read = asked;
       if (!asked) return;
       asked = false;
       callback.current?.();
     };
-    const onIdle = () => {
-      if (read) return;
+    map.on('render', onRender);
+    const stop = onEachRest(map, () => {
       asked = true;
       map.triggerRepaint();
-    };
-    map.on('render', onRender);
-    map.on('idle', onIdle);
+    });
     return () => {
       map.off('render', onRender);
-      map.off('idle', onIdle);
+      stop();
     };
   }, [map, wanted]);
 }

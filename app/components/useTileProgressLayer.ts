@@ -19,10 +19,10 @@ const LAYERS = [FILL_LAYER, ACTIVE_LAYER, LINE_LAYER];
 // drawn under the map page's pins
 const BELOW = 'wells';
 
-// The states' colours: the site's teal for being recognised, brick red for failed, grey (the ink, faint) for not cut or
-// not reached yet
+// The states' colours: the site's teal for being recognised, brick red for failed, the ink for not cut (faint) and for
+// waiting to be recognised (darker, outlined in it, to stand out over the imagery)
 export const TILE_COLOR: Record<TileState, string> = { uncut: '#2C322F', processing: '#62A4A7', failed: '#BC5646', pending: '#2C322F' };
-const TILE_OPACITY: Record<Exclude<TileState, 'processing'>, number> = { uncut: 0.18, failed: 0.45, pending: 0.18 };
+export const TILE_OPACITY: Record<Exclude<TileState, 'processing'>, number> = { uncut: 0.18, failed: 0.45, pending: 0.35 };
 const PULSE_OPACITY = [0.2, 0.65];
 
 // The map's tiles, read again every POLL_MS while it is cut or recognised (readTileProgress), and from the start again
@@ -66,7 +66,7 @@ function addLayers(map: MapLibreMap) {
       filter: ['!=', state, 'processing'],
       paint: {
         'fill-color': ['match', state, 'failed', TILE_COLOR.failed, TILE_COLOR.pending],
-        'fill-opacity': ['match', state, 'failed', TILE_OPACITY.failed, TILE_OPACITY.pending],
+        'fill-opacity': ['match', state, 'failed', TILE_OPACITY.failed, 'pending', TILE_OPACITY.pending, TILE_OPACITY.uncut],
       },
     },
     below,
@@ -87,9 +87,9 @@ function addLayers(map: MapLibreMap) {
       type: 'line',
       source: SOURCE,
       paint: {
-        'line-color': ['match', state, 'processing', TILE_COLOR.processing, 'failed', TILE_COLOR.failed, '#FFFFFF'],
-        'line-opacity': ['match', state, 'processing', 1, 'failed', 0.9, 0.5],
-        'line-width': ['match', state, 'processing', 2.5, 'failed', 2, 1],
+        'line-color': ['match', state, 'processing', TILE_COLOR.processing, 'failed', TILE_COLOR.failed, 'pending', TILE_COLOR.pending, '#FFFFFF'],
+        'line-opacity': ['match', state, 'processing', 1, 'failed', 0.9, 'pending', 0.9, 0.5],
+        'line-width': ['match', state, 'processing', 2.5, 'failed', 2, 'pending', 2.5, 1],
       },
     },
     below,

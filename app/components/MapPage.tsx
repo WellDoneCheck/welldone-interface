@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -11,16 +11,17 @@ import PinEntry from './PinEntry';
 import type { GeoJSONSource, Map as MapLibreMap, MapLayerMouseEvent, MapMouseEvent } from 'maplibre-gl';
 import { drawIcon, iconAt, pointFeatures, stripFit, useIconLayer, useMapLayer, useMapProject, type Bounds, type Icon, type Project } from './TileMap';
 import { useSurveyMap, useUnderMapShade } from './SurveyMap';
-import { TILE_COLOR, useTileProgressLayer } from './useTileProgressLayer';
+import { TILE_COLOR, TILE_OPACITY, useTileProgressLayer } from './useTileProgressLayer';
 import { useRecognisedWells } from './useRecognisedWells';
 import { useCheckLink, usePrefetchCheckView } from './useCheckView';
 import { ButtonIcon, EXPAND_PATH, ExpandedView, ImageButton, MarkerIcon, WellMarkerPin } from './CompareImage';
 import { useCutImagery } from './useCutImagery';
 import { useBackendImage } from './useBackendImage';
-import type { TileState } from '../utils/tileProgress';
+import { alphaHex, type TileState } from '../utils/tileProgress';
 import { pinScaleExpression, pinZoomScale } from '../utils/pinZoomScale';
 import { popDelay, popDuration, popOrder, unsettledIds } from '../utils/pinPop';
-import { lastMapZoom, mapCameraFor, mapImageFor, projectWithCamera, rememberMapCamera, rememberMapImage, type MapCamera } from '../utils/mapCamera';
+import { onEachRest } from '../utils/mapRest';
+import { copyCanvas, lastMapZoom, mapCameraFor, mapImageFor, rememberMapCamera, rememberMapImage, type MapCamera } from '../utils/mapCamera';
 import SharedTransition, {
   BACK_TO_UPLOAD,
   SHARED,
@@ -277,19 +278,17 @@ function useRestImageUnderPins(map: MapLibreMap | null, onImage: ((image: Blob) 
   const wanted = onImage !== null;
   useEffect(() => {
     if (!map || !wanted) return;
-    // asked: the next draw is copied; copied: the last one was (so the idle that follows it asks for no other)
+    // the next draw is copied
     let asked = false;
-    let copied = false;
+    const picture = document.createElement('canvas');
     const copy = () => {
-      const canvas = map.getCanvas();
-      const picture = document.createElement('canvas');
-      picture.width = canvas.clientWidth;
-      picture.height = canvas.clientHeight;
-      picture.getContext('2d')!.drawImage(canvas, 0, 0, picture.width, picture.height);
+      copyCanvas(map.getCanvas(), picture);
       picture.toBlob((image) => image && callback.current?.(image), 'image/webp', 0.85);
     };
+    // true once the layer is on the map (it goes just under the pins, so not before they are)
     const addLayer = () => {
-      if (map.getLayer(REST_IMAGE_LAYER) || !map.getLayer(WELL_LAYER)) return;
+      if (map.getLayer(REST_IMAGE_LAYER)) return true;
+      if (!map.getLayer(WELL_LAYER)) return false;
       map.addLayer(
         {
           id: REST_IMAGE_LAYER,
@@ -297,25 +296,20 @@ function useRestImageUnderPins(map: MapLibreMap | null, onImage: ((image: Blob) 
           render: () => {
             if (!asked) return;
             asked = false;
-            copied = true;
             copy();
           },
         },
         WELL_LAYER,
       );
+      return true;
     };
-    const onIdle = () => {
-      addLayer();
-      if (copied) {
-        copied = false;
-        return;
-      }
+    const stop = onEachRest(map, () => {
+      if (!addLayer()) return;
       asked = true;
       map.triggerRepaint();
-    };
-    map.on('idle', onIdle);
+    });
     return () => {
-      map.off('idle', onIdle);
+      stop();
       if (map.getLayer(REST_IMAGE_LAYER)) map.removeLayer(REST_IMAGE_LAYER);
     };
   }, [map, wanted]);
@@ -366,7 +360,7 @@ function useWellPinLayer(map: MapLibreMap | null, wells: MapWell[], selectedId: 
     };
   }, [ready, map, hoverable, onHover]);
 
-  return popping;
+  return { popping, hidden };
 }
 
 interface MapCanvasProps {
@@ -401,11 +395,13 @@ interface MapCanvasProps {
   onPinMenu: (well: MapWell, point: { x: number; y: number }) => boolean;
   // a right click on the map off the pins, where it was on screen and on the ground: true as for onPinMenu
   onGroundMenu: (at: { x: number; y: number; longitude: number; latitude: number }) => boolean;
+  // the line to the open card has drawn out (true), or has gone (false)
+  onLineDrawn: (drawn: boolean) => void;
 }
 
 // The survey map (shared with the compare page: SurveyMap) with a pin on every well; the pins and the line to the card
 // follow the map as it is dragged and zoomed
-function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, placing, onGroundClick, onPinMenu, onGroundMenu }: MapCanvasProps) {
+function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, startCamera, startFocus, startImage, openedFromUpload, onMapReady, scale, onPinClick, onDismiss, placing, onGroundClick, onPinMenu, onGroundMenu, onLineDrawn }: MapCanvasProps) {
   const viewport = useViewportSize();
   // from the map's middle to the middle of the space left of the card and under the navbar, where a focused well goes
   // (an offset, not padding: padding would stay on the map and shift every later fit)
@@ -441,7 +437,10 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
   }, [map, selectedId]);
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const poppingWellIds = useWellPinLayer(map, wells, selectedId ?? null, scale, !placing, setHoveredId);
+  const { popping: poppingWellIds, hidden: unpoppedWellIds } = useWellPinLayer(map, wells, selectedId ?? null, scale, !placing, setHoveredId);
+  // the selected pin too waits for its turn to pop in (coming back from its check page, first of all), instead of
+  // standing there before and popping in again once its turn comes
+  const selectedWaits = selectedId != null && unpoppedWellIds.includes(selectedId) && !poppingWellIds.includes(selectedId);
   // a picture of where the map is left with a well, for coming back to it from its check page
   useRestImageUnderPins(map, selectedId ? (image) => rememberMapImage(selectedId, image) : null);
   // in the order they pop in (the selected one, first, is a page element of its own)
@@ -545,7 +544,7 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
           {(project) => (
             <>
               {selected && <ZoomFocus record={selected} map={map} />}
-              {selected && (
+              {selected && !selectedWaits && (
                 <WellMarker
                   record={selected}
                   corner={pinCorner(selected, project, pinScaleOn(map, scale))}
@@ -571,12 +570,8 @@ function MapCanvas({ wells, imagery, area, selected, cardOpen, startsWithCard, s
             <button key={well.id} type="button" aria-label={`水井 ${well.id}`} aria-controls={CARD_ID} onClick={() => pickPin(well)} />
           ))}
       </div>
-      {/* until the map has started, the selected pin where the map will put it (the picture has the others) */}
-      {!map && startCamera && selected && (
-        <StillPin well={selected} camera={startCamera} size={viewport} scale={scale} cardOpen={cardOpen} onClick={() => pickPin(selected)} />
-      )}
       {/* keyed by well, so the line draws out again from each newly selected pin */}
-      {cardOpen && map && selected && <LeaderLine key={selected.id} map={map} record={selected} scale={scale} />}
+      {cardOpen && map && selected && <LeaderLine key={selected.id} map={map} record={selected} scale={scale} onDrawn={onLineDrawn} />}
     </>
   );
 }
@@ -718,11 +713,20 @@ const TILE_LEGEND: { state: TileState; label: string }[] = [
   { state: 'pending', label: '等待辨識' },
 ];
 
+
+// The swatches' fills as hex alpha: the map's own opacity for each state (the pulsing one at its brightest)
+const SWATCH_ALPHA: Record<TileState, string> = {
+  uncut: alphaHex(TILE_OPACITY.uncut),
+  pending: alphaHex(TILE_OPACITY.pending),
+  failed: alphaHex(TILE_OPACITY.failed),
+  processing: '73',
+};
+
 function TileSwatch({ state }: { state: TileState }) {
   return (
     <span
       className={`h-[26px] w-[26px] shrink-0 border-2 ${state === 'processing' ? 'animate-pulse motion-reduce:animate-none' : ''}`}
-      style={{ borderColor: TILE_COLOR[state], backgroundColor: `${TILE_COLOR[state]}${state === 'pending' || state === 'uncut' ? '2E' : '73'}` }}
+      style={{ borderColor: TILE_COLOR[state], backgroundColor: `${TILE_COLOR[state]}${SWATCH_ALPHA[state]}` }}
     />
   );
 }
@@ -778,22 +782,6 @@ function MapLegend({ hidden, tiles }: { hidden: boolean; tiles: Record<TileState
   );
 }
 
-// The selected pin before the map has started, placed by the camera it will start at
-function StillPin({ well, camera, size, scale, cardOpen, onClick }: { well: MapWell; camera: MapCamera; size: { width: number; height: number }; scale: number; cardOpen: boolean; onClick: () => void }) {
-  const pinScale = scale * pinZoomScale(camera.zoom);
-  return (
-    <div className="pointer-events-none absolute inset-0">
-      <WellMarker
-        record={well}
-        corner={pinCorner(well, (point) => projectWithCamera(camera, size, point), pinScale)}
-        size={PIN_SIZE * pinScale}
-        cardOpen={cardOpen}
-        onClick={onClick}
-      />
-    </div>
-  );
-}
-
 // The id above a well's pin, as over a page element pin on hover
 const PIN_LABEL =
   'pointer-events-none absolute bottom-full left-1/2 mb-1 -translate-x-1/2 whitespace-nowrap bg-[#2C322F]/85 px-2 py-0.5 text-[13px] font-bold text-white';
@@ -808,8 +796,13 @@ function PinLabel({ well, corner, size }: { well: MapWell; corner: { x: number; 
 }
 
 // Line from the selected well's pin to the open card, drawn out once the card has slid in. Redrawn on every move of the
-// map (not slid along with the pins: its other end stays on the card).
-function LeaderLine({ map, record, scale }: { map: MapLibreMap; record: MapWell; scale: number }) {
+// map (not slid along with the pins: its other end stays on the card). onDrawn: true once it has drawn out (at once
+// without motion, where it is not animated), false again when it goes.
+function LeaderLine({ map, record, scale, onDrawn }: { map: MapLibreMap; record: MapWell; scale: number; onDrawn: (drawn: boolean) => void }) {
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) onDrawn(true);
+    return () => onDrawn(false);
+  }, [onDrawn]);
   const viewport = useViewportSize();
   const pinScale = pinScaleOn(map, scale);
   const corner = pinCorner(record, useMapProject(map), pinScale);
@@ -831,6 +824,7 @@ function LeaderLine({ map, record, scale }: { map: MapLibreMap; record: MapWell;
         stroke="white"
         strokeWidth={1.5}
         className="animate-[drawStroke_0.8s_ease-out_0.45s_both] motion-reduce:animate-none"
+        onAnimationEnd={() => onDrawn(true)}
       />
     </svg>
   );
@@ -1163,10 +1157,19 @@ function AerialPhoto({ well, shared }: { well: MapWell; shared: boolean }) {
   );
 }
 
-// The aerial photo is the way into the verification page for this well
+// Whether the line from the pin to the open card has drawn out: the way into the verification page opens only then
+const LineDrawnContext = createContext(false);
+
+// The aerial photo is the way into the verification page for this well, once the line to the card has drawn out: no
+// clicks (nor its hover) before, nor the keyboard
 function VerifyLink({ well, shared, markerShown }: { well: MapWell; shared: boolean; markerShown: boolean }) {
   const wellId = well.id;
   const check = useCheckLink(wellId, TO_CHECK);
+  const lineDrawn = useContext(LineDrawnContext);
+  const onNavigate = (event: { preventDefault: () => void }) => {
+    if (!lineDrawn) event.preventDefault();
+    else check.onNavigate(event);
+  };
   // read as large as the expanded view and the check page show it: one photo, read once, already there when it flies over
   const photo = useBackendImage(wellImageUrl(well, CAPTURE_IMAGE_SIZE));
   return (
@@ -1174,9 +1177,10 @@ function VerifyLink({ well, shared, markerShown }: { well: MapWell; shared: bool
       <Link
         href={check.href}
         transitionTypes={TO_CHECK}
-        onNavigate={check.onNavigate}
+        onNavigate={onNavigate}
         aria-label={`驗證 ${wellId}：比對多期影像`}
-        className="group relative block h-[640px] w-[640px] outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7]"
+        aria-disabled={!lineDrawn}
+        className={`group relative block h-[640px] w-[640px] outline-none focus-visible:shadow-[inset_0_0_0_4px_#62A4A7] ${lineDrawn ? '' : 'pointer-events-none'}`}
       >
         {/* no photo (the well is outside its map's imagery): the card's paper shows instead of a broken image */}
         {photo && (
@@ -1296,6 +1300,7 @@ interface MapPageProps {
 export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrivedImagery, well: initialWell, openCardOnArrival, cardOpenAtStart }: MapPageProps) {
   const [viewMode, setViewMode] = useState<ViewMode>('aerial');
   const [cardOpen, setCardOpen] = useState(cardOpenAtStart);
+  const [lineDrawn, setLineDrawn] = useState(false);
   const [selectedId, setSelectedId] = useState(initialWell?.id ?? null);
   // arriving at another map or well (e.g. from the navbar) while on this page: select it (selecting a pin here
   // rewrites the address to the same well, which changes nothing)
@@ -1460,6 +1465,7 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
         onGroundClick={clickGround}
         onPinMenu={openWellMenu}
         onGroundMenu={openClearMenu}
+        onLineDrawn={setLineDrawn}
       />
 
       {wellMenu && <WellRemoveMenu key={wellMenu.well.id} at={wellMenu} scale={cornerScale} onRemoved={forgetRemovedWell} />}
@@ -1523,7 +1529,9 @@ export default function MapPage({ mapFile, wells: arrivedWells, imagery: arrived
           }`}
           style={{ zoom: scale }}
         >
-          {record && <InfoCard record={record} open={cardOpen} viewMode={viewMode} onViewModeChange={setViewMode} />}
+          <LineDrawnContext value={lineDrawn}>
+            {record && <InfoCard record={record} open={cardOpen} viewMode={viewMode} onViewModeChange={setViewMode} />}
+          </LineDrawnContext>
         </div>
       </div>
     </div>

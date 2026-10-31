@@ -24,6 +24,18 @@ export function rememberMapImage(recordId: string, image: Blob): void {
   left = { ...left, image: URL.createObjectURL(image) };
 }
 
+// Copies what a canvas shows (e.g. the map's, at its size on the page) into another, made the same size: the same
+// one each time, as every canvas made holds its pixels until the browser gets round to freeing it (one a copy, a copy
+// every few hundred milliseconds while the map is redrawn, runs into gigabytes)
+export function copyCanvas(source: HTMLCanvasElement, into: HTMLCanvasElement): void {
+  if (into.width !== source.clientWidth) into.width = source.clientWidth;
+  if (into.height !== source.clientHeight) into.height = source.clientHeight;
+  const context = into.getContext('2d')!;
+  // cleared first, as a new canvas would be: the last copy must not show through where the map is see-through
+  context.clearRect(0, 0, into.width, into.height);
+  context.drawImage(source, 0, 0, into.width, into.height);
+}
+
 // The picture of the map as it was left with this well, or null (none drawn yet there, or left with another well)
 export function mapImageFor(recordId: string): string | null {
   return left?.recordId === recordId ? left.image : null;
@@ -37,23 +49,4 @@ export function mapCameraFor(recordId: string): MapCamera | null {
 // How close in the map was last left, whichever well was selected, or null (never left)
 export function lastMapZoom(): number | null {
   return left?.camera.zoom ?? null;
-}
-
-// Web Mercator: a point's place in the world at zoom 0, from 0 to 1 (west to east, north to south)
-function worldPoint(longitude: number, latitude: number): { x: number; y: number } {
-  const sin = Math.sin((latitude * Math.PI) / 180);
-  return { x: (longitude + 180) / 360, y: 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI) };
-}
-
-// Where a point is on screen (from the map's top-left) with the map at a camera, as MapLibre would draw it (512-pixel
-// tiles): for placing something before the map itself has started
-export function projectWithCamera(camera: MapCamera, size: { width: number; height: number }, point: { longitude: number; latitude: number }): { x: number; y: number } {
-  const worldSize = 512 * 2 ** camera.zoom;
-  const centre = worldPoint(camera.center[0], camera.center[1]);
-  const target = worldPoint(point.longitude, point.latitude);
-  const [offsetX, offsetY] = camera.offset ?? [0, 0];
-  return {
-    x: size.width / 2 + offsetX + (target.x - centre.x) * worldSize,
-    y: size.height / 2 + offsetY + (target.y - centre.y) * worldSize,
-  };
 }

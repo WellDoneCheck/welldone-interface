@@ -66,9 +66,9 @@ export function aiAccuracy(wells: Pick<MapWell, 'verdict' | 'manual'>[]): { perc
   return { percent: judged.length === 0 ? null : Math.round((isWell / judged.length) * 1000) / 10, verified: judged.length };
 }
 
-// How sure the AI was that it is a well, as the site writes it: its 0–1 score to two decimals ('AI 辨識分數 0.92'); a well
-// added by hand was not the AI's
-export const confidenceText = (confidence: number | null) => (confidence === null ? '人工標記' : `AI 辨識分數 ${confidence.toFixed(2)}`);
+// How sure the AI was that it is a well, as the site writes it: its 0–1 score as a whole percent ('AI 信心度 92%'); a
+// well added by hand was not the AI's
+export const confidenceText = (confidence: number | null) => (confidence === null ? '人工標記' : `AI 信心度 ${Math.round(confidence * 100)}%`);
 
 type Point = Pick<MapWell, 'latitude' | 'longitude'>;
 

@@ -184,3 +184,8 @@ export async function readTileProgress(taskId: string): Promise<{ progress: Tile
   };
   return { progress, again: keepReading(ai, features) };
 }
+
+// An opacity (0–1) as the two hex digits that end a #RRGGBBAA colour (e.g. a legend swatch filled as faint as its tiles)
+export function alphaHex(opacity: number): string {
+  return Math.round(opacity * 255).toString(16).padStart(2, '0').toUpperCase();
+}
