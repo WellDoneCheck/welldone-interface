@@ -6,15 +6,17 @@ import type { Role } from '../utils/session';
 import {
   accountError,
   assignableRoles,
-  canCreateUsers,
   canManage,
+  canManageUsers,
   countRoles,
   filterUsers,
+  MIN_PASSWORD_LENGTH,
+  passwordError,
   ROLE_LABELS,
   type ManagedUser,
   type RoleFilter,
 } from '../utils/users';
-import { changeRole, createUser, deleteUser, fetchUsers, resetPassword } from '../utils/usersApi';
+import { changeRole, createUser, deleteUser, fetchUsers, setUserPassword } from '../utils/usersApi';
 
 // Wider than the other account pages: the account panel widens for this page (see LoginPanel)
 const CONTENT_WIDTH = 1100;
@@ -22,7 +24,7 @@ const COLUMNS = 'grid items-center gap-x-[20px]';
 // The size an fs-<px> text is shown at (as in globals.css): it stops shrinking at --min-text, while the columns go on
 const fs = (px: number) => `max(${px}px, var(--min-text, 0px))`;
 // The role column fits the role picker (editing: three labels of three characters), the actions column the row's
-// buttons and a confirmation (resetting a password), at whatever size their text is shown
+// buttons and a confirmation (deleting), at whatever size their text is shown
 const ROLE_COLUMN = `calc(9 * ${fs(20)} + 52px)`;
 const ACTIONS_COLUMN = `max(290px, calc(8 * ${fs(22)} + 92px), calc(7 * ${fs(18)} + 4 * ${fs(22)} + 64px))`;
 const GRID: CSSProperties = { gridTemplateColumns: `minmax(0, 1fr) ${ROLE_COLUMN} 140px 140px ${ACTIONS_COLUMN}` };
@@ -43,6 +45,8 @@ type RowMode = { account: string; kind: RowAction } | null;
 type Notice = { tone: 'success' | 'error'; text: string } | null;
 
 const isAdminRole = (role: Role) => role === 'root' || role === 'admin';
+const FIELD = 'h-[56px] min-w-0 bg-white px-[16px] fs-24 font-normal text-[#2C322F] outline-none shadow-[inset_0_0_0_2px_#D1E6E7] focus:shadow-[inset_0_0_0_2px_#62A4A7]';
+const PASSWORD_HINT = `至少 ${MIN_PASSWORD_LENGTH} 碼，需同時包含英文字母與數字；對方首次登入時需改成自己的密碼`;
 const displayName = (user: ManagedUser) => user.name || user.account;
 
 /* ─── Small parts ───────────────────────────────────────────────── */
@@ -154,44 +158,56 @@ export function SearchBox({ value, label, onChange }: { value: string; label: st
 interface AddUserFormProps {
   users: ManagedUser[];
   roles: Role[];
-  onAdd: (account: string, name: string, role: Role) => Promise<void>;
+  onAdd: (account: string, name: string, role: Role, password: string) => Promise<void>;
   onCancel: () => void;
 }
 
-// The new account gets the default password, to be changed on its first login
+// A password and its confirmation, side by side
+function PasswordFields({ password, confirmation, onPassword, onConfirmation }: { password: string; confirmation: string; onPassword: (value: string) => void; onConfirmation: (value: string) => void }) {
+  return (
+    <div className="flex items-center gap-[14px]">
+      <input type="password" autoComplete="new-password" value={password} onChange={(event) => onPassword(event.target.value)} placeholder="密碼" aria-label="密碼" className={`${FIELD} flex-1`} />
+      <input type="password" autoComplete="new-password" value={confirmation} onChange={(event) => onConfirmation(event.target.value)} placeholder="確認密碼" aria-label="確認密碼" className={`${FIELD} flex-1`} />
+    </div>
+  );
+}
+
+// The admin gives the new account its password, which it has to change on first login
 function AddUserForm({ users, roles, onAdd, onCancel }: AddUserFormProps) {
   const [account, setAccount] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<Role>('viewer');
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    const problem = accountError(account, users) ?? (name.trim() ? null : '請輸入姓名');
+    const problem = accountError(account, users) ?? (name.trim() ? null : '請輸入姓名') ?? passwordError(password, confirmation);
     if (problem || submitting) {
       setError(problem);
       return;
     }
     setSubmitting(true);
     try {
-      await onAdd(account.trim(), name.trim(), role);
+      await onAdd(account.trim(), name.trim(), role, password);
     } catch (failure) {
       setError((failure as Error).message);
       setSubmitting(false);
     }
   };
 
-  const field = 'h-[56px] min-w-0 bg-white px-[16px] fs-24 font-normal text-[#2C322F] outline-none shadow-[inset_0_0_0_2px_#D1E6E7] focus:shadow-[inset_0_0_0_2px_#62A4A7]';
-
   return (
     <form onSubmit={submit} className="mt-[24px] flex flex-col gap-[14px] bg-[#EEF3F1] px-[24px] py-[20px]">
       <span className="fs-24 font-bold text-[#2C322F]">新增使用者</span>
       <div className="flex items-center gap-[14px]">
-        <input autoFocus value={account} onChange={(event) => setAccount(event.target.value)} placeholder="帳號，例如 lin.xiaoming" aria-label="帳號" className={`${field} flex-[3]`} />
-        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="姓名" aria-label="姓名" className={`${field} flex-[2]`} />
+        <input autoFocus value={account} onChange={(event) => setAccount(event.target.value)} placeholder="帳號，例如 lin.xiaoming" aria-label="帳號" className={`${FIELD} flex-[3]`} />
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="姓名" aria-label="姓名" className={`${FIELD} flex-[2]`} />
         <RolePicker roles={roles} value={role} onChange={setRole} />
       </div>
+      <PasswordFields password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
+      <span className="fs-18 font-normal text-[#6F7468]">{PASSWORD_HINT}</span>
       <div className="flex items-center justify-between gap-[14px]">
         <span role="alert" className="fs-20 font-bold text-[#98412F]">{error}</span>
         <span className="flex gap-[8px]">
@@ -215,11 +231,42 @@ interface UserRowProps {
   busy: boolean;
   onMode: (kind: RowAction | null) => void;
   onRoleChange: (role: Role) => void;
-  onPasswordReset: () => void;
+  onPasswordSet: (password: string) => void;
   onDelete: () => void;
 }
 
-// Asked before resetting a password or deleting, in place of the row's buttons
+// Under the row: the new password the admin gives this account, which it has to change on its next login
+function SetPasswordForm({ user, busy, onCancel, onSet }: { user: ManagedUser; busy: boolean; onCancel: () => void; onSet: (password: string) => void }) {
+  const [password, setPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const problem = passwordError(password, confirmation);
+    setError(problem);
+    if (!problem && !busy) onSet(password);
+  };
+
+  return (
+    <form onSubmit={submit} className="flex flex-col gap-[14px] px-[16px] pb-[20px]">
+      <span className="fs-22 font-bold text-[#2C322F]">為 {displayName(user)}（{user.account}）設定新密碼</span>
+      <PasswordFields password={password} confirmation={confirmation} onPassword={setPassword} onConfirmation={setConfirmation} />
+      <span className="fs-18 font-normal text-[#6F7468]">{PASSWORD_HINT}</span>
+      <div className="flex items-center justify-between gap-[14px]">
+        <span role="alert" className="fs-20 font-bold text-[#98412F]">{error}</span>
+        <span className="flex gap-[8px]">
+          <TextButton onClick={onCancel}>取消</TextButton>
+          <button type="submit" disabled={busy} className="h-[44px] bg-[#62A4A7] px-[20px] fs-22 font-bold text-white transition-colors hover:bg-[#54999D] disabled:cursor-wait disabled:opacity-60">
+            {busy ? '設定中…' : '設定'}
+          </button>
+        </span>
+      </div>
+    </form>
+  );
+}
+
+// Asked before deleting, in place of the row's buttons
 function Confirm({ question, action, busy, onCancel, onConfirm }: { question: string; action: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
@@ -232,9 +279,9 @@ function Confirm({ question, action, busy, onCancel, onConfirm }: { question: st
   );
 }
 
-function UserRow({ user, mode, roles, busy, onMode, onRoleChange, onPasswordReset, onDelete }: UserRowProps) {
+function UserRow({ user, mode, roles, busy, onMode, onRoleChange, onPasswordSet, onDelete }: UserRowProps) {
   const [draftRole, setDraftRole] = useState(user.role);
-  const background = mode === 'delete' || mode === 'password' ? 'bg-[#F7E5DF]/60' : 'hover:bg-white';
+  const background = mode === 'delete' ? 'bg-[#F7E5DF]/60' : mode === 'password' ? 'bg-[#EEF3F1]' : 'hover:bg-white';
 
   return (
     <div className={`group relative border-b border-[#ECE9E0] transition-colors duration-200 ${background}`}>
@@ -257,7 +304,7 @@ function UserRow({ user, mode, roles, busy, onMode, onRoleChange, onPasswordRese
           {roles && mode === 'view' && (
             <>
               <TextButton onClick={() => onMode('edit')}>編輯</TextButton>
-              <TextButton onClick={() => onMode('password')}>重設密碼</TextButton>
+              <TextButton onClick={() => onMode('password')}>修改密碼</TextButton>
               <TextButton tone="danger" onClick={() => onMode('delete')}>刪除</TextButton>
             </>
           )}
@@ -269,10 +316,10 @@ function UserRow({ user, mode, roles, busy, onMode, onRoleChange, onPasswordRese
               </TextButton>
             </>
           )}
-          {mode === 'password' && <Confirm question="改回預設密碼？" action="重設" busy={busy} onCancel={() => onMode(null)} onConfirm={onPasswordReset} />}
           {mode === 'delete' && <Confirm question="確定刪除？" action="刪除" busy={busy} onCancel={() => onMode(null)} onConfirm={onDelete} />}
         </div>
       </div>
+      {mode === 'password' && <SetPasswordForm user={user} busy={busy} onCancel={() => onMode(null)} onSet={onPasswordSet} />}
     </div>
   );
 }
@@ -333,11 +380,11 @@ export default function UserManagementPage({ actor }: { actor: Role }) {
     }
   };
 
-  const addUser = async (account: string, name: string, role: Role) => {
-    const user = await createUser(account, name, role);
+  const addUser = async (account: string, name: string, role: Role, password: string) => {
+    const user = await createUser(account, name, role, password);
     setUsers((current) => [user, ...(current ?? [])]);
     setAdding(false);
-    setNotice({ tone: 'success', text: `已建立 ${name}（${account}），首次登入需修改預設密碼` });
+    setNotice({ tone: 'success', text: `已建立 ${name}（${account}），首次登入需修改密碼` });
   };
 
   const emptyText = loadError ?? (users === null ? '載入中…' : '找不到符合的使用者');
@@ -347,7 +394,7 @@ export default function UserManagementPage({ actor }: { actor: Role }) {
       title="用戶管理"
       description="新增帳號、調整角色或移除不再使用的帳號"
       width={CONTENT_WIDTH}
-      action={canCreateUsers(actor) ? <AddUserButton onClick={() => setAdding(true)} /> : undefined}
+      action={canManageUsers(actor) ? <AddUserButton onClick={() => setAdding(true)} /> : undefined}
     >
       <div className="mt-[28px] flex items-end justify-between gap-[20px] border-b-2 border-[#ECE9E0]">
         <RoleTabs counts={counts} value={roleFilter} onChange={setRoleFilter} />
@@ -393,11 +440,11 @@ export default function UserManagementPage({ actor }: { actor: Role }) {
                 return (current) => current.map((candidate) => (candidate.id === user.id ? changed : candidate));
               }, `已將 ${displayName(user)} 改為${ROLE_LABELS[role]}`)
             }
-            onPasswordReset={() =>
+            onPasswordSet={(password) =>
               run(async () => {
-                await resetPassword(user.id);
+                await setUserPassword(user.id, password);
                 return (current) => current;
-              }, `已將 ${displayName(user)}（${user.account}）的密碼改回預設密碼，下次登入需修改`)
+              }, `已設定 ${displayName(user)}（${user.account}）的新密碼，下次登入需修改`)
             }
             onDelete={() =>
               run(async () => {

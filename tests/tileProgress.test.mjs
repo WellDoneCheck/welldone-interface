@@ -8,6 +8,8 @@ import {
   mercatorToLngLat,
   aiFinished,
   readTileProgress,
+  CUT_READ_MS,
+  AI_READ_MS,
   recognisedCount,
   recognisedTileAt,
   recognitionFeatures,
@@ -111,21 +113,21 @@ function backend(answers) {
 }
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
 
-test('a map waiting to be cut has nothing to draw yet, and is read again', async () => {
+test('a map waiting to be cut has nothing to draw yet, and is read again soon', async () => {
   backend({ '/tasks/t1': task('waiting') });
-  assert.deepEqual(await readTileProgress('t1'), { progress: null, again: true });
+  assert.deepEqual(await readTileProgress('t1'), { progress: null, readAgainIn: CUT_READ_MS });
 });
 
-test('a map being cut shows the cells not cut yet, the imagery cut so far and the whole image, read again until cut', async () => {
+test('a map being cut shows the cells not cut yet, the imagery cut so far and the whole image, read again soon until cut', async () => {
   backend({ '/tasks/t1': task('active'), '/tasks/t1/tiles/cut': cutting });
-  const { progress, again } = await readTileProgress('t1');
+  const { progress, readAgainIn } = await readTileProgress('t1');
   assert.deepEqual(states(progress.features), ['uncut']);
   assert.equal(progress.recognised, null);
   assert.deepEqual(progress.bounds, grid.bounds);
   assert.deepEqual(progress.imagery, cutImagery(cutting));
-  assert.equal(again, true);
+  assert.equal(readAgainIn, CUT_READ_MS);
   backend({ '/tasks/t1': task('failed'), '/tasks/t1/tiles/cut': cutting });
-  assert.equal((await readTileProgress('t1')).again, false);
+  assert.equal((await readTileProgress('t1')).readAgainIn, null);
 });
 
 test('longitude and latitude become EPSG:3857 metres again', () => {
@@ -147,13 +149,13 @@ test('the tile the AI has recognised under a point on the ground, none where it 
 
 test('a cut map shows the tiles still to recognise and how many are recognised', async () => {
   backend({ '/tasks/t1': task('completed'), '/tasks/t1/tiles/cut': grid, '/tasks/t1/ai/progress': ai('processing', [[0, 0, 'done'], [0, 1, 'processing']]) });
-  const { progress, again } = await readTileProgress('t1');
+  const { progress, readAgainIn } = await readTileProgress('t1');
   assert.deepEqual(states(progress.features), ['processing', 'pending']);
   assert.equal(progress.recognised, 1);
   assert.equal(progress.imagery, null);
   assert.equal(progress.retryable, false);
   assert.deepEqual(progress.recognisedTileAt(...mercatorToLngLat(1100, 4900)), { row: 0, col: 0 });
-  assert.equal(again, true);
+  assert.equal(readAgainIn, AI_READ_MS);
 });
 
 test('an opacity becomes the two hex digits of a colour\'s alpha, as the legend swatches had them', () => {

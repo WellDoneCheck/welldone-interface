@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chunkCount, chunkRange, chunkBytes, remainingChunks, sentBytes, retryable } from '../app/utils/chunkedUpload.ts';
+import { chunkCount, chunkRange, chunkBytes, remainingChunks, sentBytes, retryable, demoSentBytes, DEMO_UPLOAD_MS, uploadInChunks } from '../app/utils/chunkedUpload.ts';
 import { ApiError } from '../app/utils/api.ts';
 
 const MB = 1024 * 1024;
@@ -53,4 +53,34 @@ test('retryable: transient failures are retried, client errors are given up at o
   assert.equal(retryable(new ApiError(413, 'x')), false);
   // an unexpected (non-ApiError) failure is retried in case it was a glitch
   assert.equal(retryable(new Error('boom')), true);
+});
+
+test('demoSentBytes: the demo map goes up over the same time whatever its size', () => {
+  for (const size of [10 * MB, 4000 * MB]) {
+    assert.equal(demoSentBytes(0, size), 0);
+    assert.equal(demoSentBytes(DEMO_UPLOAD_MS / 2, size), size / 2);
+    assert.equal(demoSentBytes(DEMO_UPLOAD_MS, size), size);
+    assert.equal(demoSentBytes(DEMO_UPLOAD_MS * 2, size), size);
+  }
+});
+
+test('an upload the backend marks demo sends no chunk, shows it all sent after DEMO_UPLOAD_MS, then completes', async () => {
+  globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
+  const asked = [];
+  globalThis.fetch = async (url, init) => {
+    const path = new URL(url).pathname;
+    asked.push(path);
+    const answers = { '/tasks/upload/init': { uploadId: 'u1', demo: true }, '/tasks/upload/complete': { id: 'task-1' } };
+    return new Response(JSON.stringify(answers[path] ?? {}), { status: 200 });
+  };
+  const sent = [];
+  let merging = false;
+  const started = Date.now();
+  const task = await uploadInChunks(new File([new Uint8Array(1000)], 'demo-map.tif'), { onProgress: (bytes) => sent.push(bytes), onMerging: () => (merging = true) });
+  assert.deepEqual(task, { id: 'task-1' });
+  assert.deepEqual(asked, ['/tasks/upload/init', '/tasks/upload/complete']);
+  assert.ok(Date.now() - started >= DEMO_UPLOAD_MS);
+  assert.equal(sent[0], 0);
+  assert.equal(sent.at(-1), 1000);
+  assert.ok(merging);
 });

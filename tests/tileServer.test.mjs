@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { asWebp, authorizeTile, BASEMAP_MAX_ZOOM, BASEMAP_TILES, taskCoverUrl, throughSite } from '../app/utils/tileServer.ts';
+import { asWebp, authorizeTile, isMoreOfSameImagery, BASEMAP_MAX_ZOOM, BASEMAP_TILES, taskCoverUrl, throughSite } from '../app/utils/tileServer.ts';
 import { clearSession, startSession } from '../app/utils/session.ts';
 
 globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };
@@ -51,4 +51,14 @@ test('without a login, tiles go without a token', () => {
 
 test("a map's cover is the backend's WebP cut around its centre", () => {
   assert.equal(taskCoverUrl('task 1'), '/tasks/task%201/tiles/cover');
+});
+
+test('imagery with more of it cut is the same imagery, read again in place; another map or ground is not', () => {
+  const cut = (v, extra = {}) => ({ tiles: [`http://api.local/tasks/t1/tiles/cut/{z}/{x}/{y}.png?v=${v}`], bounds: [120, 23, 120.1, 23.1], minzoom: 14, maxzoom: 23, ...extra });
+  assert.equal(isMoreOfSameImagery(cut(3), cut(4)), true);
+  assert.equal(isMoreOfSameImagery(cut(3), cut(4, { tiles: ['http://api.local/tasks/t2/tiles/cut/{z}/{x}/{y}.png?v=4'] })), false);
+  assert.equal(isMoreOfSameImagery(cut(3), cut(4, { bounds: [120, 23, 120.2, 23.1] })), false);
+  assert.equal(isMoreOfSameImagery(cut(3), cut(4, { maxzoom: 22 })), false);
+  assert.equal(isMoreOfSameImagery(null, cut(4)), false);
+  assert.equal(isMoreOfSameImagery(cut(3), null), false);
 });

@@ -162,15 +162,20 @@ export interface TileProgress {
 
 export const NO_TILE = () => null;
 
-// The map's tiles as they are now (null: nothing to draw yet, not being cut), and whether to read them again: while
-// it waits to be cut or is being cut, and while the AI has tiles left (keepReading)
-export async function readTileProgress(taskId: string): Promise<{ progress: TileProgress | null; again: boolean }> {
+// How long until the tiles are read again: soon while the map waits to be cut or is cut, so each tile cut shows
+// quickly; less often while the AI recognises them
+export const CUT_READ_MS = 500;
+export const AI_READ_MS = 5000;
+
+// The map's tiles as they are now (null: nothing to draw yet, not being cut), and how long until they are read again
+// (null: not again): while it waits to be cut or is being cut, and while the AI has tiles left (keepReading)
+export async function readTileProgress(taskId: string): Promise<{ progress: TileProgress | null; readAgainIn: number | null }> {
   const split = await fetchSplitStatus(taskId);
-  if (split === 'waiting') return { progress: null, again: true };
+  if (split === 'waiting') return { progress: null, readAgainIn: CUT_READ_MS };
   if (split !== 'completed') {
     const grid = await fetchTileGrid(taskId);
     const progress = { features: uncutFeatures(grid), recognised: null, bounds: grid.bounds, imagery: cutImagery(grid), retryable: false, recognisedTileAt: NO_TILE };
-    return { progress, again: split === 'active' };
+    return { progress, readAgainIn: split === 'active' ? CUT_READ_MS : null };
   }
   const [grid, ai] = await Promise.all([fetchTileGrid(taskId), fetchAiTiles(taskId)]);
   const features = recognitionFeatures(grid, ai);
@@ -182,7 +187,7 @@ export async function readTileProgress(taskId: string): Promise<{ progress: Tile
     retryable: aiFinished(ai),
     recognisedTileAt: (lng: number, lat: number) => recognisedTileAt(grid, ai, lng, lat),
   };
-  return { progress, again: keepReading(ai, features) };
+  return { progress, readAgainIn: keepReading(ai, features) ? AI_READ_MS : null };
 }
 
 // An opacity (0–1) as the two hex digits that end a #RRGGBBAA colour (e.g. a legend swatch filled as faint as its tiles)

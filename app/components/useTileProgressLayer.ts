@@ -2,11 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ExpressionSpecification, GeoJSONSource, Map as MapLibreMap } from 'maplibre-gl';
-import { countStates, NO_TILE, readTileProgress, type TileProgress, type TileState } from '../utils/tileProgress';
+import { AI_READ_MS, countStates, NO_TILE, readTileProgress, type TileProgress, type TileState } from '../utils/tileProgress';
 
-// How often the tiles are read again while the map is cut or recognised, and how long the tiles the AI is at take to
-// fade in or out (they pulse)
-const POLL_MS = 5000;
+// How long the tiles the AI is at take to fade in or out (they pulse)
 const PULSE_MS = 800;
 
 const SOURCE = 'tile-progress';
@@ -19,13 +17,13 @@ const LAYERS = [FILL_LAYER, ACTIVE_LAYER, LINE_LAYER];
 // drawn under the map page's pins
 const BELOW = 'wells';
 
-// The states' colours: the site's teal for being recognised, brick red for failed, the ink for not cut (faint) and for
-// waiting to be recognised (darker, outlined in it, to stand out over the imagery)
-export const TILE_COLOR: Record<TileState, string> = { uncut: '#2C322F', processing: '#62A4A7', failed: '#BC5646', pending: '#2C322F' };
-export const TILE_OPACITY: Record<Exclude<TileState, 'processing'>, number> = { uncut: 0.18, failed: 0.45, pending: 0.35 };
+// The states' colours: the site's teal for being recognised, brick red for failed, the ink for not cut (faint) and a
+// bright yellow for waiting to be recognised (outlined in it, to stand out at a glance over the imagery)
+export const TILE_COLOR: Record<TileState, string> = { uncut: '#2C322F', processing: '#62A4A7', failed: '#BC5646', pending: '#FACC15' };
+export const TILE_OPACITY: Record<Exclude<TileState, 'processing'>, number> = { uncut: 0.18, failed: 0.45, pending: 0.45 };
 const PULSE_OPACITY = [0.2, 0.65];
 
-// The map's tiles, read again every POLL_MS while it is cut or recognised (readTileProgress), and from the start again
+// The map's tiles, read again while it is cut or recognised (readTileProgress says when), and from the start again
 // whenever round changes (after a retry); null until there is something to draw. A failed read is tried again.
 function useTileProgress(taskId: string, round: number): TileProgress | null {
   const [read, setRead] = useState<{ taskId: string; progress: TileProgress } | null>(null);
@@ -35,13 +33,13 @@ function useTileProgress(taskId: string, round: number): TileProgress | null {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const refresh = () =>
       readTileProgress(taskId).then(
-        ({ progress, again }) => {
+        ({ progress, readAgainIn }) => {
           if (!current) return;
           if (progress) setRead({ taskId, progress });
-          if (again) timer = setTimeout(refresh, POLL_MS);
+          if (readAgainIn !== null) timer = setTimeout(refresh, readAgainIn);
         },
         () => {
-          if (current) timer = setTimeout(refresh, POLL_MS);
+          if (current) timer = setTimeout(refresh, AI_READ_MS);
         },
       );
     refresh();

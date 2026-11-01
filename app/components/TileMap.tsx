@@ -2,9 +2,9 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
-import type { Map as MapLibreMap, MapMouseEvent, PaddingOptions, RasterSourceSpecification, StyleSpecification, SymbolLayerSpecification } from 'maplibre-gl';
+import type { Map as MapLibreMap, MapMouseEvent, PaddingOptions, RasterSourceSpecification, RasterTileSource, StyleSpecification, SymbolLayerSpecification } from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { asWebp, authorizeTile, BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM, BASEMAP_TILES, IMAGERY_TILE_SIZE, throughSite, type Imagery } from '../utils/tileServer';
+import { asWebp, authorizeTile, isMoreOfSameImagery, BASEMAP_ATTRIBUTION, BASEMAP_MAX_ZOOM, BASEMAP_TILES, IMAGERY_TILE_SIZE, throughSite, type Imagery } from '../utils/tileServer';
 import { isLightBackdrop, reportLogoBackdrop } from '../utils/logoBackdrop';
 import type { MapCamera } from '../utils/mapCamera';
 import { onEachRest } from '../utils/mapRest';
@@ -456,8 +456,11 @@ export default function TileMap({
 
   useEffect(() => {
     if (!map || imagery?.tiles[0] === shownImagery.current?.tiles[0]) return;
+    const source = map.getSource<RasterTileSource>('imagery');
+    // more of it cut (while cutting): its tiles read again in place, the ones shown kept until then, not put back blank
+    if (source && imagery && isMoreOfSameImagery(shownImagery.current, imagery)) source.setTiles(imagerySource(imagery).tiles ?? []);
+    else showImagery(map, imagery);
     shownImagery.current = imagery;
-    showImagery(map, imagery);
   }, [map, imagery]);
 
   useEffect(() => {

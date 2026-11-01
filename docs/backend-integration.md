@@ -25,12 +25,12 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 
 | 畫面 | API | 前端位置 |
 | --- | --- | --- |
-| 登入、改密碼（預設密碼強制改） | `POST /auth/login`、`PATCH /users/me/password`（改完重新登入） | `auth.ts`、`LoginPanel`、`ChangePasswordPage` |
-| 帳號管理 | `GET/POST /users`、`PATCH /users/:id/role`、`PATCH /users/:id/reset-password`、`DELETE /users/:id` | `usersApi.ts`、`UserManagementPage` |
+| 登入、改密碼（管理者給的密碼、預設密碼，首次登入強制改；root 不用） | `POST /auth/login`、`PATCH /users/me/password`（改完重新登入） | `auth.ts`、`LoginPanel`、`ChangePasswordPage` |
+| 帳號管理 | `GET/POST /users`、`PATCH /users/:id/role`、`PATCH /users/:id/password`（建立帳號與「修改密碼」都由管理者輸入密碼，對方下次登入須改）、`DELETE /users/:id` | `usersApi.ts`、`UserManagementPage` |
 | 伺服器日誌（只有 root；用戶選單「伺服器日誌」） | `GET /server-logs/:source`（`backend`／`splitter` 最新月檔；先讀檔尾，之後每 3 秒帶上次的 `file`、`after` 只拿新寫入的行；`q` 關鍵字、`level=warn|error` 由後端篩選）、`GET /server-logs/:source/file`（下載整個月檔） | `serverLogs.ts`、`useServerLog`、`ServerLogsPage` |
 | 影像匯入 | `GET /tasks`、`GET /tasks/:id/progress`（`no-store` 輪詢，見 §5 #1）、分片上傳（見 §6）、`PATCH /tasks/:id/name`、`DELETE /tasks/:id`、`POST /tasks/:id/ai/retry`（「重試辨識」：辨識停下且還有失敗或沒跑到的小圖時，不帶 body 全部重試；地圖頁點「等待辨識」的灰色小圖可帶 `{ tiles: [{ row, col }] }` 只重試那格）、`DELETE /tasks/:id/ai/tiles/:row/:col`（「清除辨識結果」：辨識停下後，admin / root 在地圖頁右鍵點已辨識的小圖，刪掉那格 AI 的水井（含已驗證的，手動標記的保留），小圖回到等待辨識、可再點它重試） | `useTaskRecords`、`UploadPage`、`MapPage`、`chunkedUpload.ts` |
 | 地圖檢視 | `GET /tasks`（`?record=` 或最新完成的）、`GET /wells?taskId=`、`GET /tasks/:id/tiles/tilejson` 與圖磚、`GET /wells/:id/image`；卡片時間下方顯示 AI 信心度（`confidence`，0–1 換成整數百分比，如 92%；手動新增的顯示「人工標記」），旁邊的「是井／不是井」直接 `PATCH /wells/:id/verdict`（viewer 只能看）；「新增水井」（合法井比對旁，operator / admin，有影像才顯示）按下後點地圖影像上的位置、確認後 `POST /wells`（`{ taskId, e, n }`，座標由前端把經緯度換成 EPSG:3857 公尺），接著 `PATCH /wells/:id/verdict` 標成「是井」（人工放的就是井），重讀 `GET /wells?taskId=` 並打開新井的卡片；手動新增的井（`source: manual`）在圖釘上按右鍵可刪除（按兩次確認，`DELETE /wells/:id`；權限同刪地圖，operator 限自己上傳的地圖） | `routeRecords.ts` 的 `loadMapView`、`MapPage`、`PinEntry`、`TileMap`、`wells.ts` |
-| 地圖上的小圖進度：切圖中已切好的直接顯示影像、旁邊還沒切到的標灰色；切完標出還沒辨識完的（辨識中閃動、失敗、等待辨識）；切完自動載入影像 | `GET /tasks/:id`（`split_status`）、`GET /tasks/:id/tiles/cut`（格線、已切好與空白的小圖、整張影像範圍、已切好部分的圖磚網址；後端新增）、`GET /tasks/:id/tiles/cut/{z}/{x}/{y}.png`（後端新增）、`GET /tasks/:id/ai/progress`，每 5 秒直到辨識結束；每多辨識完小圖就重讀 `GET /wells?taskId=`，地圖的圖釘與左下角的數字跟著更新；切完讀 `tilejson` | `tileProgress.ts`、`useTileProgressLayer`、`useRecognisedWells`、`useCutImagery`、`MapPage` 的圖例 |
+| 地圖上的小圖進度：切圖中已切好的直接顯示影像、旁邊還沒切到的標灰色；切完標出還沒辨識完的（辨識中閃動、失敗、等待辨識）；切完自動載入影像 | `GET /tasks/:id`（`split_status`）、`GET /tasks/:id/tiles/cut`（格線、已切好與空白的小圖、整張影像範圍、已切好部分的圖磚網址；後端新增）、`GET /tasks/:id/tiles/cut/{z}/{x}/{y}.png`（後端新增）、`GET /tasks/:id/ai/progress`；切圖中（含等待切圖）每 0.5 秒讀一次，影像多切一張時圖磚就地重讀、不整層換掉，辨識中每 5 秒直到辨識結束；每多辨識完小圖就重讀 `GET /wells?taskId=`，地圖的圖釘與左下角的數字跟著更新；切完讀 `tilejson` | `tileProgress.ts`、`useTileProgressLayer`、`useRecognisedWells`、`useCutImagery`、`MapPage` 的圖例 |
 | 地圖名稱改名（地圖、檢查、比對頁） | `PATCH /tasks/:id/name`（空白＝回到預設名稱） | `RecordName` |
 | 水井檢查 | `GET /wells/code/:code`，接著 `GET /tasks/:id`、`GET /wells?taskId=`、`GET /wells/:id/timeline` 同時讀（每期的照片用 `/wells/:id/image`）、`PATCH /wells/:id/verdict` | `loadCheckView`、`CheckPage`、`TimelineCompare` |
 | 資料匯出 | 同地圖檢視的水井（`/export?record=`，沒有就最新完成的）、`PATCH /wells/:id/verdict`；勾選的水井 CSV 由前端產生；摘要的「辨識準確率」由前端以這張地圖的水井算（AI 找到且已驗證者中是井的比例，人工加的不算） | `ExportPage` |
@@ -41,7 +41,7 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 | AI 助理 Skyhi | `POST /copilot/ask`：後端從題庫找最相似的題目回答（不接 LLM），或查水井編號、經緯度、年份與地區；回答下方的按鈕連到站內頁面（點了收起助理；「前往匯出頁」「前往合法井比對」這類沒指定地圖的按鈕只在地圖、匯出、比對頁顯示，帶上目前的 `?record=`；已經在那一頁的按鈕不顯示，見 `actionsForPage`），沒把握時給建議題目（點了就送出）；呼叫失敗時把錯誤寫在回覆裡。輸入框上方的常見問題每次打開助理時向 `GET /copilot/suggestions` 要（帶目前路徑，地圖頁另帶 `?record=`），後端依頁面挑題型並帶入地圖所在的鄉鎮、年份；拿到前或連不上時顯示固定的三題。規格見 well-back `docs/COPILOT.md` | `utils/copilot.ts`、`useCopilotChat`、`CopilotWidget` |
 
 權限照後端四種角色（root / admin / operator / viewer）：檢視者看不到上傳、改名、驗證、刪除；
-operator 只能刪自己上傳的地圖；只有 root 能建帳號。
+operator 只能刪自己上傳的地圖；root 與 admin 能建帳號（admin 只能建 operator / viewer，admin 帳號只有 root 能建）。
 
 ## 還是模擬資料
 
@@ -72,6 +72,7 @@ operator 只能刪自己上傳的地圖；只有 root 能建帳號。
 3. `POST /tasks/upload/chunk`（multipart：`file`、`uploadId`、`chunkIndex`、`totalChunks`）逐片送；用 XHR 取真實 `loaded` 位元組，`UploadPage` 據此算整體進度、真實速度與剩餘時間。單片失敗重試 3 次（後端會保留已收到的分片）。
 4. `POST /tasks/upload/complete`：`{ uploadId, totalChunks }` → 合併分片、建立 `Task`（與 `GET /tasks` 同型別）。
 
+- **Demo 檔**（後端 Demo 模式、檔名為 `DEMO_UPLOAD_FILENAME`）：init 回應多帶 `demo: true`，前端跳過 2、3 步不送分片，進度條固定跑 `DEMO_UPLOAD_MS`（2 秒）後直接 complete，與檔案大小無關。
 - 上傳開始時左面板的放置區與檔案清單收合，中央顯示整體進度（`UploadProgress`）；全部完成後停留 `DONE_PAUSE` 再展開。
 - `GET /tasks/upload/active`（所有人的進行中分片上傳：`filename`、`totalSize`、`progress`、`uploadedById`、`startedAt`；不含 `uploadId`）目前前端尚未使用。
 - 續傳只在同一分頁內有效：失敗的檔保留 `uploadId`，重試時從 `status` 接續。跨頁面重整無法自動續傳（瀏覽器無法重讀檔案，需重新選檔）。

@@ -64,6 +64,26 @@ export function sentBytes(uploadedChunks: number[], totalSize: number, chunkSize
   return uploadedChunks.reduce((sum, index) => sum + chunkBytes(index, totalSize, chunkSize), 0);
 }
 
+// The demo's map (the backend marks its upload demo at init): none of it is sent, the backend already has it. Its
+// progress runs the same time whatever its size, read again every DEMO_TICK_MS.
+export const DEMO_UPLOAD_MS = 2000;
+const DEMO_TICK_MS = 100;
+
+// The bytes of the demo's map shown as sent this long into its upload
+export function demoSentBytes(elapsedMs: number, totalSize: number): number {
+  return Math.round(Math.min(1, elapsedMs / DEMO_UPLOAD_MS) * totalSize);
+}
+
+// Shows the demo's map going up over DEMO_UPLOAD_MS, sending nothing
+async function showDemoSent(totalSize: number, onProgress: (sent: number) => void): Promise<void> {
+  const started = Date.now();
+  for (let sent = 0; sent < totalSize; ) {
+    await delay(DEMO_TICK_MS);
+    sent = demoSentBytes(Date.now() - started, totalSize);
+    onProgress(sent);
+  }
+}
+
 interface UploadHandlers {
   // the uploadId as soon as it is known, so a later retry can resume the same upload
   onUploadId?: (uploadId: string) => void;
@@ -91,11 +111,18 @@ async function sendChunk(uploadId: string, index: number, chunk: Blob, totalChun
 export async function uploadInChunks(file: File, handlers: UploadHandlers, resumeId?: string, chunkSize = CHUNK_SIZE): Promise<Task> {
   const totalChunks = chunkCount(file.size, chunkSize);
 
-  const uploadId = resumeId ?? (await api<{ uploadId: string }>('/tasks/upload/init', {
+  const started = resumeId ? { uploadId: resumeId } : await api<{ uploadId: string; demo?: boolean }>('/tasks/upload/init', {
     method: 'POST',
     body: { filename: file.name, totalSize: file.size, chunkSize },
-  })).uploadId;
+  });
+  const { uploadId } = started;
   handlers.onUploadId?.(uploadId);
+
+  if ('demo' in started && started.demo) {
+    handlers.onProgress(0);
+    await showDemoSent(file.size, handlers.onProgress);
+    return completeUpload(uploadId, totalChunks, handlers);
+  }
 
   const status = await api<UploadStatus>(`/tasks/upload/status/${uploadId}`);
   const todo = remainingChunks(totalChunks, status.uploadedChunks);
@@ -110,6 +137,10 @@ export async function uploadInChunks(file: File, handlers: UploadHandlers, resum
     handlers.onProgress(done);
   }
 
+  return completeUpload(uploadId, totalChunks, handlers);
+}
+
+function completeUpload(uploadId: string, totalChunks: number, handlers: UploadHandlers): Promise<Task> {
   handlers.onMerging?.();
   return api<Task>('/tasks/upload/complete', { method: 'POST', body: { uploadId, totalChunks } });
 }

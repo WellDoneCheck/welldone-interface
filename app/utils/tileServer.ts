@@ -17,6 +17,14 @@ export interface Imagery {
 
 export const IMAGERY_TILE_SIZE = 256;
 
+// The same imagery with more of it cut: its tiles at the same addresses but for the version asked for (?v=, the
+// tiles cut so far), over the same ground. Its tiles can be read again in place rather than the imagery put back.
+export function isMoreOfSameImagery(shown: Imagery | null, next: Imagery | null): boolean {
+  if (!shown || !next) return false;
+  const withoutVersion = (imagery: Imagery) => imagery.tiles.map((template) => template.replace(/\?.*$/, '')).join(' ');
+  return withoutVersion(shown) === withoutVersion(next) && shown.bounds.join() === next.bounds.join() && shown.minzoom === next.minzoom && shown.maxzoom === next.maxzoom;
+}
+
 // 404 until the map has been cut
 export const fetchImagery = (taskId: string) => api<Imagery>(`/tasks/${encodeURIComponent(taskId)}/tiles/tilejson`);
 

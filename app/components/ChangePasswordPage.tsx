@@ -8,7 +8,7 @@ import { MIN_PASSWORD_LENGTH, passwordError } from '../utils/users';
 
 interface ChangePasswordPageProps {
   username: string;
-  // still on the default password: it has to be changed before the site can be used
+  // still on the password an admin gave (or the default one): it has to be changed before the site can be used
   firstLogin: boolean;
   onChanged: () => void;
 }
@@ -44,7 +44,7 @@ export default function ChangePasswordPage({ username, firstLogin, onChanged }: 
   return (
     <AccountSubPage
       title="修改密碼"
-      description={firstLogin ? '首次登入，請先將預設密碼改為您自己的密碼' : '更新您的登入密碼'}
+      description={firstLogin ? '首次登入，請先將管理者提供的密碼改為您自己的密碼' : '更新您的登入密碼'}
       width={644}
     >
       <Image src="/admin/divider-wide.svg" alt="" width={642} height={1} className="mt-6 h-px w-full" />

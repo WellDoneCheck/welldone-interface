@@ -60,8 +60,8 @@ export function countRoles(users: ManagedUser[]): Record<RoleFilter, number> {
   return { all: users.length, admin: count('admin'), operator: count('operator'), viewer: count('viewer') };
 }
 
+// Root and admin create and manage accounts (an admin only operators and viewers: canManage, assignableRoles)
 export const canManageUsers = (actor: Role) => actor === 'root' || actor === 'admin';
-export const canCreateUsers = (actor: Role) => actor === 'root';
 
 // Whether the actor may change the target's role, reset their password or delete them
 export function canManage(actor: Role, target: Role): boolean {

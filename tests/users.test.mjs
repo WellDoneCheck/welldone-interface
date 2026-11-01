@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import {
   accountError,
   assignableRoles,
-  canCreateUsers,
   canManage,
   canManageUsers,
   countRoles,
@@ -58,9 +57,8 @@ test('counts users per role tab', () => {
   assert.deepEqual(countRoles(USERS), { all: 4, admin: 2, operator: 1, viewer: 1 });
 });
 
-test('only root creates accounts; root and admin manage them', () => {
-  assert.equal(canCreateUsers('root'), true);
-  assert.equal(canCreateUsers('admin'), false);
+test('root and admin create and manage accounts', () => {
+  assert.equal(canManageUsers('root'), true);
   assert.equal(canManageUsers('admin'), true);
   assert.equal(canManageUsers('operator'), false);
   assert.equal(canManageUsers('viewer'), false);
