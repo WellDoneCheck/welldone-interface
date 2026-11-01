@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
+  // lets computers on the local network open the dev server by its IP (next dev blocks other origins by default)
+  allowedDevOrigins: ['192.168.*.*', '10.*.*.*', '172.*.*.*'],
   experimental: {
     // enables unauthorized() / forbidden() and the app/unauthorized.tsx (401) and app/forbidden.tsx (403) pages
     authInterrupts: true,

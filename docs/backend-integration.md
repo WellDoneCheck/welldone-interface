@@ -12,6 +12,15 @@ NEXT_PUBLIC_API_URL=http://localhost:3000
 
 後端的 `ALLOWED_ORIGINS` 要包含前端的網址（CORS），`BACKEND_URL` 是後端回給前端的圖磚網址（見 `docs/map-tiles.md`）。
 
+### 區網的電腦連 dev server
+
+`next dev` 會印出 `Network: http://<本機 IP>:<port>`，區網電腦開這個網址；`next.config.ts` 的 `allowedDevOrigins` 已放行
+`192.168.*.*`、`10.*.*.*`、`172.*.*.*`（否則 dev 的資源會被擋，頁面不會動）。API 是瀏覽器直接呼叫，所以：
+
+- `NEXT_PUBLIC_API_URL` 要改成區網電腦也連得到的後端位址（例如 `http://192.168.1.10:3000`），不能是 `localhost`
+- 後端的 `ALLOWED_ORIGINS` 要加上 `http://<本機 IP>:<port>`
+- macOS 防火牆若開著，要允許 node 接受連線
+
 ## 共用的基礎（`app/utils/`）
 
 | 檔案 | 做什麼 |
